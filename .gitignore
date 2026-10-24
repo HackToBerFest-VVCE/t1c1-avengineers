@@ -1,0 +1,24 @@
+# credentials
+.env
+.env.*
+!.env.example
+*.pem
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+.coverage
+htmlcov/
+# JS
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+# tooling
+.DS_Store
+.idea/
+.vscode/
+# transient outputs
+.tmp/
