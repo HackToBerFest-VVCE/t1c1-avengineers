@@ -13,6 +13,7 @@ from pydantic import ValidationError
 
 from .config import Settings
 from .documents import PageImage
+from .eligibility import assess_all
 from .schemas import ExtractedAnalysis, StudentProfile
 
 
@@ -48,7 +49,7 @@ Return ONE JSON object using EXACTLY this shape and no other keys:
   "summary_en": "2-3 sentence English explanation",
   "summary_kn": "2-3 sentence Kannada explanation",
   "deadline": {{"date_text": "as written or null", "iso_date": "YYYY-MM-DD only when unambiguous else null", "evidence": "short exact quote or null", "page": 1}},
-  "criteria": [{{"requirement": "quoted or paraphrased criterion", "evidence": "short source quote or null", "page": 1, "status": "needs_review", "explanation_en": "comparison to supplied student facts, cautious", "explanation_kn": "same in Kannada"}}],
+  "criteria": [{{"requirement": "quoted or paraphrased criterion", "evidence": "short source quote or null", "page": 1, "rule": {{"field": "annual_income|percentage|state|category|education_level", "operator": "lt|lte|gt|gte|eq|one_of", "value_number": null, "values": []}} or null, "status": "needs_review", "explanation_en": "comparison to supplied student facts, cautious", "explanation_kn": "same in Kannada"}}],
   "documents": [{{"name": "required document", "evidence": "source quote or null", "page": 1}}],
   "steps": [{{"title": "concise action title", "detail_en": "grounded instructions", "detail_kn": "Kannada instructions"}}],
   "unknowns": ["important missing or unreadable information"],
@@ -58,6 +59,11 @@ Return ONE JSON object using EXACTLY this shape and no other keys:
 Deadline and all page references can be null. status options are ONLY
 "likely_meets", "may_not_meet", "needs_review". confidence options are ONLY
 "high", "medium", "low".
+For each criterion, populate rule ONLY if evidence explicitly supports an exact numerical
+threshold (annual_income or percentage, with value_number in INR or percentage)
+or an exact categorical condition (state/category/education_level with values array).
+For ambiguous, non-machine-checkable, or conditional rules, set rule to null.
+Do not infer numeric thresholds or convert "domicile" to state equality without text support.
 A likely_meets/may_not_meet status must be supported by an explicit criterion and
 matching student data; otherwise use needs_review. These are tentative comparisons,
 not official eligibility determinations. If the upload is not a scholarship notice,
@@ -163,4 +169,6 @@ async def analyze_with_gemma(
         raise GemmaError("Gemma returned an empty or unexpected response. Please try again.") from exc
     if not text.strip():
         raise GemmaError("Gemma did not return document analysis. Please try again.")
-    return parse_gemma_output(text, len(pages))
+    result = parse_gemma_output(text, len(pages))
+    result.eligibility_overall, result.criteria = assess_all(result.criteria, profile)
+    return result

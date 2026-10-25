@@ -41,10 +41,19 @@ class Deadline(BaseModel):
             return None
 
 
+class EligibilityRule(BaseModel):
+    # Only structured rules explicitly supported by the source should be supplied.
+    field: str
+    operator: str
+    value_number: float | None = None
+    values: list[str] = Field(default_factory=list)
+
+
 class Criterion(BaseModel):
     requirement: str
     evidence: str | None = None
     page: int | None = Field(default=None, ge=1)
+    rule: EligibilityRule | None = None
     status: CriterionStatus = CriterionStatus.needs_review
     explanation_en: str = "Requires manual verification."
     explanation_kn: str = "ದಯವಿಟ್ಟು ಅರ್ಹತೆಯನ್ನು ಪರಿಶೀಲಿಸಿ."
@@ -69,6 +78,7 @@ class ExtractedAnalysis(BaseModel):
     summary_kn: str = "ಈ ಪ್ರಕಟಣೆಯನ್ನು ಪರಿಶೀಲಿಸಬೇಕಾಗಿದೆ."
     deadline: Deadline = Field(default_factory=Deadline)
     criteria: list[Criterion] = Field(default_factory=list)
+    eligibility_overall: str = "needs_verification"
     documents: list[RequiredDocument] = Field(default_factory=list)
     steps: list[ActionStep] = Field(default_factory=list)
     unknowns: list[str] = Field(default_factory=list)

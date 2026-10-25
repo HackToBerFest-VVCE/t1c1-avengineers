@@ -11,6 +11,7 @@ export interface SourceFact {
 }
 export interface Criterion extends SourceFact {
   requirement: string;
+  rule?: { field: string; operator: string; value_number: number | null; values: string[] } | null;
   status: 'likely_meets' | 'may_not_meet' | 'needs_review';
   explanation_en: string;
   explanation_kn: string;
@@ -28,6 +29,7 @@ export interface Analysis {
   summary_kn: string;
   deadline: SourceFact & { date_text: string | null; iso_date: string | null };
   criteria: Criterion[];
+  eligibility_overall: "needs_verification" | "possible_mismatch" | "appears_to_meet_extracted";
   documents: RequiredDocument[];
   steps: Step[];
   unknowns: string[];
