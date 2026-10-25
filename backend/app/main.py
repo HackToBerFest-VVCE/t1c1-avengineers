@@ -1,5 +1,7 @@
 """HTTP API: memory-only upload validation and genuine Gemma 4 document analysis."""
 import json
+import asyncio
+from contextlib import asynccontextmanager, suppress
 import time
 import uuid
 from pathlib import Path
@@ -11,11 +13,43 @@ from pydantic import ValidationError
 
 from .config import get_settings
 from .documents import DocumentError, prepare_document
-from .gemma import GemmaError, analyze_with_gemma
-from .schemas import AnalysisResponse, HealthResponse, StudentProfile
+from .gemma import GemmaError, analyze_with_gemma, request_context
+from .evidence import verify_analysis
+from .eligibility import assess_all
+from .sessions import SessionStore
+from .chat import answer_question
+from .roadmap import build_roadmap
+from .schemas import AnalysisResponse, HealthResponse, StudentProfile, ChatRequest, ChatAnswer, SessionRequest
 
 settings = get_settings()
-app = FastAPI(title="FormBridge AI API", version="1.0.0", docs_url="/docs")
+@asynccontextmanager
+async def lifespan(app):
+    async def sweep():
+        while True:
+            await asyncio.sleep(30)
+            app.state.sessions.cleanup()
+    task = asyncio.create_task(sweep())
+    yield
+    task.cancel()
+    with suppress(asyncio.CancelledError):
+        await task
+    app.state.sessions.clear()
+
+
+app = FastAPI(title="FormBridge AI API", version="3.0.0", docs_url="/docs", lifespan=lifespan)
+app.state.sessions = SessionStore(settings.session_ttl_seconds, settings.session_max_count, settings.session_max_bytes)
+
+
+@app.middleware("http")
+async def request_metadata(request, call_next):
+    token = request_context.set(uuid.uuid4().hex[:12])
+    try:
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = request_context.get()
+        response.headers["Cache-Control"] = "no-store"
+        return response
+    finally:
+        request_context.reset(token)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[s.strip() for s in settings.frontend_origin.split(",") if s.strip()],
@@ -37,7 +71,7 @@ async def health() -> HealthResponse:
 @app.post("/api/analyze", response_model=AnalysisResponse)
 async def analyze(file: UploadFile = File(...), profile: str = Form("{}")) -> AnalysisResponse:
     start = time.monotonic()
-    original_name = Path(file.filename or "uploaded-document").name[:150]
+    original_name = Path((file.filename or "uploaded-document").replace("\\", "/")).name[:150]
     try:
         student = StudentProfile.model_validate(json.loads(profile))
     except (json.JSONDecodeError, ValidationError, TypeError) as exc:
@@ -59,14 +93,57 @@ async def analyze(file: UploadFile = File(...), profile: str = Form("{}")) -> An
     except GemmaError as exc:
         raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
 
+    verify_analysis(result, pages)
+    result.eligibility_overall, result.criteria = assess_all(result.criteria, student)
+    try:
+        session_id = app.state.sessions.create(pages, student, result)
+    except ValueError as exc:
+        raise HTTPException(503, "Document context is too large. Try a smaller document.") from exc
     return AnalysisResponse(
         **result.model_dump(),
+        session_id=session_id,
+        session_expires_in=settings.session_ttl_seconds,
+        roadmap=build_roadmap(result, student),
         model_used=settings.gemma_model,
         pages_analyzed=len(pages),
         processing_seconds=round(time.monotonic() - start, 2),
-        request_id=uuid.uuid4().hex[:12],
+        request_id=request_context.get(),
         filename=original_name,
     )
+
+
+def require_session(token: str):
+    session = app.state.sessions.get(token)
+    if session is None:
+        raise HTTPException(410, "Document session expired or unavailable. Analyze the notice again.")
+    return session
+
+
+@app.post("/api/chat", response_model=ChatAnswer)
+async def chat(body: ChatRequest) -> ChatAnswer:
+    session = require_session(body.session_id)
+    if session.lock.locked():
+        raise HTTPException(409, "An answer is already being prepared. Please wait.")
+    async with session.lock:
+        try:
+            return await answer_question(session, body.question, body.language, settings)
+        except GemmaError as exc:
+            raise HTTPException(exc.status, str(exc)) from exc
+
+
+@app.post("/api/chat/reset")
+async def reset_chat(body: SessionRequest):
+    session = require_session(body.session_id)
+    if session.lock.locked():
+        raise HTTPException(409, "Wait for the current answer before resetting chat.")
+    session.history.clear()
+    return {"status": "cleared"}
+
+
+@app.post("/api/session/delete")
+async def delete_session(body: SessionRequest):
+    app.state.sessions.delete(body.session_id)
+    return {"status": "deleted"}
 
 
 @app.exception_handler(Exception)

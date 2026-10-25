@@ -1,26 +1,25 @@
-# Avengineers checkpoint presentation plan
+# Avengineers V3 Checkpoint Plan
 
-## Before arrival (three-day build window)
-Day 1 — run the multimodal Gemma backend and verify one sample notice. Push to organizers' repository.
-Day 2 — integrate eligibility summary, bilingual output, checklist and source excerpts. Push tested changes.
-Day 3 — perform real-document validation, improve UI, document errors and verify deployment. Push tested release.
+## Checkpoint 1: Evidence and Model Contribution
 
-## Checkpoint 1 (suggested 90-second flow)
-1. State the application-access problem in one sentence.
-2. Show an unedited PDF and explain why it's difficult to interpret.
-3. Upload it and show that the backend sends real page images to Gemma 4.
-4. Open the result; show extracted deadline, evidence, Kannada explanation, and checklist.
-5. Mention evidence verification, and acknowledge known limitations.
+1. State the scholarship-document problem and show the unedited source.
+2. Upload it with explicitly supplied student facts; identify the real Gemma model used.
+3. Open the side-by-side viewer, click a requirement source and explain verified/partial/unavailable distinctions.
+4. Show the deterministic comparison and an omitted age field remaining Needs verification.
+5. Show English/Kannada summaries and the application checklist.
 
-## Between checkpoints
-Write down judge feedback verbatim, prioritize an improvement that can be demonstrated safely in the event time, implement and test it, and commit it in the provided repository.
+## Checkpoint 2: Reasoning and Reliability
 
-## Checkpoint 2
-Compare checkpoint-1 behavior to current behavior using the same input file; show tests, GitHub commit(s), and the before/after result.
+1. Ask why the student needs verification and inspect the assistant's citations.
+2. Ask for an absent deadline or portal URL and check uncertainty rather than invention.
+3. Switch Kannada, ask a question, and have a native speaker assess the answer.
+4. Toggle/export/print the roadmap; clarify that a checked box is preparation, not submission.
+5. Show actual test output and the real repository diff/commits, when created by the team.
 
-## Judge Q&A — honest answers
-Q: Why Gemma 4? A: Its multimodal image+text capabilities are the core extraction/understanding engine, not a decorative chatbot.
-Q: Do you guarantee eligibility? A: No. We display tentative comparisons and require students to verify official criteria.
-Q: How do you handle hallucinations? A: Narrow extraction prompt, Pydantic validation, missing-value handling, citation sanitization, and explicit source verification.
-Q: How is user data handled? A: No application database or upload history. Pages and user-provided facts are sent to Google's hosted model API for inference; do not upload highly sensitive documents without assessing the provider policy.
-Q: What changed during the event? A: Show actual issue, commit diff, test, and improved output—not a rehearsed claim.
+## Before Public Demo
+
+Complete the four live-language combinations in testing.md with a valid key. Rehearse provider quota/failure recovery and scan limitations. Keep sensitive student data out of the demo. Use the official organizer repository according to organizer guidance; this upgrade does not create or push commits. Do not claim checkpoint results or accuracy benchmarks before measuring them.
+
+## Architecture Presentation
+
+Use the accurate runtime architecture in architecture.md as the technical basis. Any organizer-required Halloween styling belongs to the presentation diagram, not application behavior. The original submission bitmap remains preserved for reference; no new themed diagram is included in this source upgrade.

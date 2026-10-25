@@ -1,16 +1,11 @@
-# Daily progress log (fill in with REAL work and Git commits)
+# Implementation Progress Log
 
-| Date | Work performed | Commit link/hash | Evidence / test | Next action |
-| --- | --- | --- | --- | --- |
-| YYYY-MM-DD | Initial setup and first Gemma request | pending | output screenshot | Test sample PDF |
-| YYYY-MM-DD | Bilingual results and eligibility | pending | tests | Validate real notice |
-| YYYY-MM-DD | Deploy, verify and polish | pending | deployed URL | Rehearse |
+## 2026-10-25: V2 to V3 Source Upgrade
 
-Only record work actually completed. Push each day's updates to the official organizer-provided repository.
+- Inspected the actual supplied ZIP, APIs, schemas, document libraries, eligibility engine, frontend, tests, deployment and Kiro materials.
+- Extended the existing implementation with independent page quotation verification, source badges, interactive PDF/image evidence viewer, Gemma retries, expiring document chat, eligibility counts/age/study-mode, bilingual result controls and application roadmap export/printing.
+- Preserved original samples, branding, license, source foundation, GitHub CI and Kiro materials; updated Python/CI compatibility and test dependencies.
+- Ran automated checks in the local upgrade workspace. See the delivered implementation report for final counts and build/browser results.
+- No valid live API key was available. No hosted model success, Kannada semantic accuracy, deployment, Git commit/push or competition outcome is claimed.
 
-## Proposed next commit — eligibility engine upgrade
-- Added structured eligibility rule extraction hints to the Gemma 4 prompt.
-- Added deterministic backend comparisons with conservative uncertainty handling.
-- Displayed overall preliminary result and bilingual badges in Eligibility tab.
-- Added nine unit tests covering successful comparisons, incomplete facts, unsupported rules, and hallucinated model statuses.
-- Verified backend test suite: 25 passed in packaging environment. Frontend npm validation pending dependency installation.
+Recommended next work: live-language matrix with a native speaker, actual provider quota/retry rehearsal, Render deployment test, and account/rate-limit controls before public access.

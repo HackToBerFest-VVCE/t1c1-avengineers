@@ -1,135 +1,133 @@
-# FormBridge AI
+# FormBridge AI 3.0
 
-FormBridge AI is a multilingual scholarship-notice navigator powered by Google's Gemma 4.
-It reads PDF documents and images using actual multimodal Gemma 4 inference.
-It extracts deadlines, conditions, required documents, and actionable steps.
-It provides English and Kannada guidance and optional, conservative eligibility comparisons.
-Built by Avengineers for VVCE Hacktoberfest Track 1 — Best Use of Gemma 4.
+FormBridge AI explains scholarship notices with Google's multimodal Gemma 4.
+It reads PDF/JPG/PNG notices and produces English and Kannada guidance.
+Students can inspect original pages, check citation verification, and compare extracted rules with their own facts.
+A document-grounded assistant and application roadmap help students prepare their next steps.
+Built by Avengineers for VVCE Hacktoberfest 2026, Track 1 - Challenge A: Best Use of Gemma 4.
 
-## What is included
+## Features
 
-- React + TypeScript + Vite frontend, designed with deep navy and electric-cyan details.
-- FastAPI backend making a **real hosted Gemma 4 request** to Google's Gemini API (`gemma-4-26b-a4b-it`).
-- In-memory PDF-to-image conversion (up to 5 pages), JPEG/PNG validation, 8 MB upload limit.
-- Document summaries in English/Kannada, source excerpts with page labels, deadlines, cautionary eligibility comparisons, requirements, steps, and checklist export.
-- Two fictional sample notices (PDF and PNG) for a quick live demo. **These are not real scholarship offers.**
-- Kiro specifications, backend tests, frontend tests, GitHub Actions, Render Blueprint, and checkpoint notes.
+- Preserves the v2 React/FastAPI implementation, existing samples, navy/cyan identity, summaries, deadlines, profile, requirements and checklist.
+- Page-specific PDF text extraction and independent citation verification: `verified`, `partial_match`, `unverified`, `not_available`.
+- PDF.js evidence viewer with page navigation, zoom, fit width, expansion, and JPG/PNG support. Citation buttons in summaries, requirements, documents, dates, roadmap and chat open the original page and quotation.
+- Deterministic numeric and exact categorical comparisons, including optional age and study mode. Unverified source quotes and missing student facts remain Needs verification. No prefilled student facts.
+- Bounded, expiring document sessions for real Gemma 4 chat, server-held context/history, English/Kannada responses, clickable citations, reset and retry.
+- Bilingual application roadmap with critical/important/optional priorities, tab-local checkbox progress, text download and printing. Checking a box does not submit an application.
+- Bounded transient API retries, safe diagnostic logging and input-preserving error recovery. No production mock mode or model substitution.
 
-## Requirements
+## Prerequisites
 
-- Python **3.11+** and Node.js **20.19+ or 22+**
-- A Google AI Studio API key with access to Gemma 4 via the Gemini API. See [Google's official Gemma docs](https://ai.google.dev/gemma/docs/core/gemma_on_gemini_api).
-- Internet access for the hosted Gemma 4 model.
+- Python **3.12** (tested on 3.12; compatible source), Node **22.13+** (tested on Node 26.3), npm, and internet for package installation/model calls.
+- A Google AI Studio key permitted to access `gemma-4-26b-a4b-it` with available quota. [Official Gemma API documentation](https://ai.google.dev/gemma/docs/core/gemma_on_gemini_api).
+- Modern Chromium, Firefox or Safari; PDF.js browser support depends on the installed react-pdf version. Kannada fonts and a native-speaker review are recommended.
 
-## Local quick start
+## Local Setup
 
-**Terminal 1 — Backend**
+From the extracted `FormBridge-AI` directory:
 
 ```bash
 cd backend
-python -m venv .venv
-# macOS/Linux:
+python3.12 -m venv .venv
 source .venv/bin/activate
-# Windows PowerShell: .venv\\Scripts\\Activate.ps1
-pip install -r requirements.txt
+python -m pip install -r requirements.txt -r requirements-dev.txt
 cp .env.example .env
-# Edit .env and replace GEMINI_API_KEY with your own key.
+# Set your GEMINI_API_KEY in .env, then:
 uvicorn app.main:app --reload --port 8000
 ```
 
-**Terminal 2 — Frontend**
+In a second terminal:
 
 ```bash
 cd frontend
-npm install
-cp .env.example .env
+npm ci
 npm run dev
 ```
 
-Open **http://localhost:5173**. The app automatically proxies `/api` to FastAPI on port 8000. `/api/health` reports if the server sees a configured key; the key itself is NEVER sent to the frontend.
+Open [localhost:5173](http://localhost:5173). Vite proxies `/api` to port 8000. Open [FastAPI docs](http://localhost:8000/docs) for validated schemas. Windows users can activate `.venv\Scripts\Activate.ps1` and create `.env` with an editor.
 
-> Windows users: Create `.env` with your editor or use `copy .env.example .env`. Use `\.venv\Scripts\Activate.ps1` as appropriate. Never check `.env` into Git.
+The production app shows an honest configuration/provider error until a valid key is supplied. The fictional sample notices are demonstration material, not scholarship offers.
 
-### First live AI test
+## Configuration
 
-1. Open the app and confirm the bottom-right status displays **Gemma 4 ready**.
-2. Click **Scholarship PDF** under sample notices (a fictional demo document).
-3. Optionally set Karnataka, Undergraduate, income `250000` and marks `85`.
-4. Click **Analyze with Gemma 4**. The backend converts each PDF page to an image and calls the configured model. The API key must have access and available quota.
-5. View eligibility guidance and document checkbox list, switch to **ಕನ್ನಡ**, and download the checklist.
-6. Compare each statement with the supplied sample PDF. Not every model response is guaranteed accurate; repeat tests for different notices.
+Backend variables (see `backend/.env.example`):
 
-No mock results are served in the live app. If the API key is absent or the provider fails, the app shows an error instead of inventing an analysis.
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `GEMINI_API_KEY` | placeholder | Server-only Google API credential |
+| `GEMMA_MODEL` | `gemma-4-26b-a4b-it` | Core model for analysis and chat; no fallback |
+| `FRONTEND_ORIGIN` | `http://localhost:5173` | Comma-separated exact CORS origins |
+| `MAX_UPLOAD_MB` | 8 | Upload byte limit (UI also enforces 8 MB) |
+| `MAX_PDF_PAGES` | 5 | PDF page limit |
+| `GEMMA_TIMEOUT_SECONDS` | 40 | Per-attempt network timeout; connect timeout 10s |
+| `GEMMA_MAX_RETRIES` | 2 | At most 3 total attempts |
+| `SESSION_TTL_SECONDS` | 1200 | Absolute session lifetime, not sliding |
+| `SESSION_MAX_COUNT` | 32 | Process-local context capacity; oldest evicted first |
+| `SESSION_MAX_BYTES` | 67108864 | Accounted context budget, including history allowance |
 
-## API contract
+Frontend `VITE_API_BASE_URL` is optional in development. For a separate production host, set it to the public backend origin, without `/api`. Never put credentials in any `VITE_*` variable.
 
-**`GET /api/health`** → `{status, gemma_configured, model}`.
+## Architecture and API
 
-**`POST /api/analyze`** → `multipart/form-data`:
-- `file`: PDF/JPG/PNG, up to 8 MB and 5 pages.
-- `profile`: JSON string, e.g. `{"education_level":"Undergraduate","state":"Karnataka","category":"Not specified","annual_income":250000,"percentage":85}`.
+Gemma 4 interprets page images, extracts bilingual scholarship facts and structured rules, and reasons conversationally over the same notice. Ordinary application code validates uploads/JSON, verifies quotations, compares rules, retains bounded contexts and renders the UI. See [architecture](docs/architecture.md) and [Gemma integration](docs/gemma-integration.md).
 
-Returns a structured response with `title`, `summary_en`, `summary_kn`, `deadline`, `criteria`, `documents`, `steps`, `warnings`, `unknowns`, `confidence`, `model_used`, `pages_analyzed`, `processing_seconds`, and `request_id`. See Pydantic models in [`backend/app/schemas.py`](backend/app/schemas.py). Interactive API docs: **http://localhost:8000/docs**.
+| Endpoint | Input | Behavior |
+| --- | --- | --- |
+| `GET /api/health` | none | Backend/configuration status, not a live model probe |
+| `POST /api/analyze` | multipart `file`, JSON `profile` | Validated analysis, verified citations, roadmap, opaque `session_id` and TTL |
+| `POST /api/chat` | JSON `session_id`, `question`, `language` (`en`/`kn`) | Genuine Gemma answer with independently checked citations |
+| `POST /api/chat/reset` | JSON `session_id` | Clears that session's conversation history |
+| `POST /api/session/delete` | JSON `session_id` | Releases context; UI invokes this on new analysis/reset/file replacement |
 
-## Run tests
+Chat questions are limited to 2,000 characters. Missing/expired/evicted contexts return 410; overlapping requests within one chat return 409. The session token is a bearer capability: anyone possessing it can use the context until deletion/expiry. It stays in frontend memory, never in a URL. No authentication is implemented.
+
+## Testing
 
 ```bash
 cd backend
-pip install -r requirements-dev.txt pytest-asyncio
-PYTHONPATH=. pytest -q
-```
-
-```bash
-cd frontend
-npm install
-npm run test
+python -m pytest -q
+cd ../frontend
+npm run test -- --run
 npm run build
 ```
 
-Backend unit tests inject a fake HTTP transport only to assert that a correctly structured request would be sent to the real model. They do **not** claim to have contacted Google. Live API integration requires your API key. See [test coverage and limits](docs/testing.md).
+Optional repeatable browser validation (requires the backend `.venv` above):
 
-## Deploy to Render
+```bash
+cd frontend
+npx playwright install chromium
+npm run test:e2e
+```
 
-A [`render.yaml`](render.yaml) Blueprint is included. Deploy from the **VVCE organizer-assigned GitHub repository**, not a separate repository.
+Browser tests own ports 18030 and 15173; these must be free. `tests.e2e_server:app` is **test-only** and uses `httpx.MockTransport`, never Google's real API. Production must start **`app.main:app`**. Browser tests exercise actual PDF.js rendering, desktop/mobile layouts, uploads, citations, chat, Kannada UI, checklist download, errors and multipage navigation. See [testing details and live-language matrix](docs/testing.md). Mocked tests do not establish model accuracy.
 
-1. On Render, create a new **Blueprint** using that repository and approve the proposed Python web service and static site.
-2. Set private backend `GEMINI_API_KEY` using Render's environment settings; never put it into source, static frontend variables or commits.
-3. Set backend `FRONTEND_ORIGIN` to the actual frontend URL, e.g. `https://your-web.onrender.com`.
-4. Set frontend **build-time** `VITE_API_BASE_URL` to the backend URL, e.g. `https://your-api.onrender.com` (without `/api` at the end).
-5. Deploy/redeploy both services. Visit the frontend, check health and perform a genuine PDF analysis.
+## Render Deployment
 
-> Render service names and URLs are allocated by Render. The examples above are placeholders. `FRONTEND_ORIGIN` can also contain comma-separated allowed origins. Free tier spin-up, limits and credits depend on Render's current policy.
+The existing `render.yaml` remains a Python web service plus static Vite site. It uses Python 3.12 and `uvicorn app.main:app`, not the test server. Set `GEMINI_API_KEY` privately, `FRONTEND_ORIGIN` to the exact static-site origin, and build-time `VITE_API_BASE_URL` to the backend origin. Use Node 22.13+; the Blueprint pins Node 22. Deploy the static `dist/` folder with SPA fallback to `index.html`. No paid database is required.
 
-## Architecture and trade-offs
+Use **one backend worker/instance** for this prototype: sessions are local to a process. Restarts, free-service sleep, rolling deploys or another worker lose context; students must analyze again. Multi-instance production requires a shared expiring store and access controls. No deployment or Git push is performed by this upgrade.
 
-See [Kiro design spec](.kiro/specs/formbridge-ai/design.md) for the Mermaid flow. The original submitted architecture image is preserved under [`docs/original-submission-architecture.png`](docs/original-submission-architecture.png). The runtime implementation uses:
+## Troubleshooting
 
-`React UI → FastAPI upload validation → PDFium/Pillow page rendering → server-side Gemini API: gemma-4-26b-a4b-it → Pydantic JSON validation → bilingual UI + checklist`
+- 500/502/503/504: provider transients retry twice with exponential backoff and jitter; use Retry after failure. Upload/profile remain selected.
+- 429: without a short valid `Retry-After`, return immediately. A wait longer than 8 seconds is left to the user, avoiding repeated quota consumption.
+- 401/403/404 or invalid requests: not automatically retried. Check server-side key/model permissions and configuration.
+- 410 in chat: analyze the document again; the context expired or was evicted/restarted.
+- Unverified citation: inspect the cited page; the quotation was not reliably located. Partial match never means verified.
+- Text verification unavailable: images/scanned pages have no reliable text layer. Multimodal analysis still works, but automatic evidence verification does not.
+- PDF viewer fails: use Open original, verify browser support, and ensure the bundled PDF.js worker is deployed. The worker is local, not fetched from a third-party CDN.
+- CORS failures: confirm exact public frontend origin and rebuild the frontend after changing `VITE_API_BASE_URL`.
 
-The hosted model is accessed through Google's officially documented **Gemini REST `generateContent` endpoint** with multimodal inline image parts and a server-only key. This is a genuine Gemma 4 integration; a separate Google GenAI SDK is not needed.
+## Privacy and Limitations
 
-## Privacy, reliability & limitations
+Uploads are decoded/processed in memory; no upload files/database are created. After successful analysis, rendered page bytes, extracted text, profile, analysis and the last six conversation turns are retained in bounded server memory for a default 20 minutes. Expired entries are inaccessible immediately on access, removed by a 30-second sweep or another store operation, and cleared on shutdown. Capacity eviction can occur earlier; active requests can hold a reference until they finish. Session bytes are an accounting budget, not a strict Python RSS cap. Browser results disappear on reload; roadmap task IDs/checkboxes stay in `sessionStorage` until the tab closes. No full notice/profile is persisted in browser storage.
 
-- **No persistence:** This MVP does not write uploaded document bytes or personal profile fields to disk/database. The results remain in browser state while the tab is open.
-- **Provider transfer:** The uploaded pages and optional profile facts **are sent to Google's API for inference**. Check Google's terms and data-handling requirements before uploading sensitive student data.
-- **Accuracy:** This is educational assistance, not a definitive eligibility determination. The model may hallucinate or mistranslate. Evidence and page labels are model-generated leads; check them against the original notice. Deadline is only populated when identifiable.
-- **Input:** PDFs are rasterized into page images; 5 pages and 8 MB maximum; no handwriting guarantee. For production use add authentication, API rate limits, file malware scanning and usage budgets.
-- **Availability:** A configured Google API key, network, model access and quota are required for analysis.
+Pages/profile/chat are sent to Google's hosted API. Provider retention terms apply. This is not end-to-end encryption. Diagnostics log request ID, API status, retry count, category and duration, not keys, profiles or documents.
 
-## Hackathon / Kiro workflow
+Verified means a sufficiently long normalized quotation occurs **on the cited page**; it does not validate the interpretation, threshold structure, document authenticity or extraction completeness. Fuzzy matches are partial only. No OCR or passage-coordinate extraction is implemented; citations navigate pages and show quotations separately, without fabricated highlights. Corrupt/absent text layers cannot be verified reliably. Dates and extracted names remain original when translation is unavailable.
 
-Read [the Kiro requirements](.kiro/specs/formbridge-ai/requirements.md), [tasks](.kiro/specs/formbridge-ai/tasks.md), [checkpoints](docs/checkpoint-plan.md), and [daily progress log](docs/progress-log.md).
+No live Google API or native-speaker Kannada accuracy evaluation was possible during this upgrade because no runtime API key was supplied. Four input/output language combinations are listed in the manual test matrix. Before a public demo, perform them with real notices and a Kannada reviewer. Public hosting also needs authentication, rate limiting, usage budgets and abuse controls.
 
-Keep the original FormBridge idea and Gemma 4 Challenge A. Use Kiro's free tier to review, test, and improve this code in the organizers' repository. Push **real updates every day**, not only an initial ZIP import. Show improvements and commit history at both checkpoints.
+## Hackathon Materials
 
-## Credits
-
-Developed as an Avengineers hackathon prototype. Gemma is a Google model; this project is not an official scholarship provider or an official Google product. Licensed under MIT.
-
-## Version 2: evidence-backed eligibility comparisons
-
-Gemma 4 is asked to extract an **optional structured rule** per eligibility condition (numeric thresholds or exact categorical values). The backend `app/eligibility.py` then performs deterministic comparisons with the student profile, rather than trusting a model-generated eligibility verdict. Each criterion stays **Needs verification** if the document quote/page, supported rule, or student fact is missing. The overall result distinguishes **Appears to meet extracted rules**, **Possible mismatch**, and **Needs verification**. The label *never* certifies official eligibility because extraction may omit conditions and source excerpts are generated by the model, not independently OCR-verified.
-
-Compatibility: existing Gemma outputs without a `rule` field still work; such conditions stay at Needs verification. New tests cover income thresholds, case-insensitive categories, missing student facts, missing evidence, and misleading model verdicts. To try the upgraded prompt, restart the backend after updating the source and analyze a sample notice again.
-
-The frontend now displays the overall preliminary assessment at the top of the Eligibility tab. Check source quotations manually against the PDF or image before relying on them.
+[V3 features](docs/features-v3.md), [checkpoint plan](docs/checkpoint-plan.md), [progress log](docs/progress-log.md), the original architecture image and `.kiro/` specifications are included. No commits, benchmarks or competition outcomes are fabricated. MIT license; Avengineers project, not an official scholarship provider or Google product.

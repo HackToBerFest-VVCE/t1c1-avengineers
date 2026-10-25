@@ -22,3 +22,5 @@ coverage/
 .vscode/
 # transient outputs
 .tmp/
+test-results/
+playwright-report/

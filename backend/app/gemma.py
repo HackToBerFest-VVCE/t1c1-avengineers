@@ -4,8 +4,16 @@ No demo/mock outputs are returned in production. The only replacement used in te
 is an injected httpx.MockTransport so we can test the precise outgoing request.
 """
 import base64
+import asyncio
 import json
+import logging
+import random
 import re
+import time
+import uuid
+from contextvars import ContextVar
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 import httpx
@@ -15,6 +23,14 @@ from .config import Settings
 from .documents import PageImage
 from .eligibility import assess_all
 from .schemas import ExtractedAnalysis, StudentProfile
+
+request_context: ContextVar[str] = ContextVar("request_id", default="")
+logger = logging.getLogger("formbridge.gemma")
+logger.setLevel(logging.INFO)
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("%(levelname)s %(name)s %(message)s"))
+    logger.addHandler(handler)
 
 
 class GemmaError(RuntimeError):
@@ -70,6 +86,13 @@ not official eligibility determinations. If the upload is not a scholarship noti
 explain this in warnings and return sparse arrays; never fabricate details.
 Only give application steps supported by the notice, or general advice explicitly
 identified as general advice. Keep English/Kannada outputs coherent and accurate.
+Also include summary_sources: an array of {{"evidence": "exact quote", "page": 1}}.
+Add requirement_kn to criteria, name_kn to documents, and title_kn to steps.
+Add warnings_kn and unknowns_kn arrays translated consistently from the English arrays.
+Steps may include evidence, page, and priority (critical|important|optional).
+Structured rule fields also support age (numeric) and study_mode (categorical).
+These additional keys extend the shape above. Never generate verification statuses;
+the application independently verifies quotations against page text.
 """
 
 
@@ -100,7 +123,7 @@ def parse_gemma_output(text: str, page_count: int) -> ExtractedAnalysis:
 
     # UI must not claim out-of-range page citations. These are model-suggested
     # references; users must inspect the original document themselves.
-    all_referenced = [analysis.deadline, *analysis.criteria, *analysis.documents]
+    all_referenced = [analysis.deadline, *analysis.summary_sources, *analysis.criteria, *analysis.documents, *analysis.steps]
     for item in all_referenced:
         if item.page is not None and item.page > page_count:
             item.page = None
@@ -109,6 +132,78 @@ def parse_gemma_output(text: str, page_count: int) -> ExtractedAnalysis:
     if not analysis.title.strip():
         analysis.title = "Unidentified scholarship or notice"
     return analysis
+
+
+def retry_after_seconds(value: str | None) -> float | None:
+    if not value:
+        return None
+    try:
+        return max(0, float(value))
+    except ValueError:
+        try:
+            return max(0, (parsedate_to_datetime(value) - datetime.now(timezone.utc)).total_seconds())
+        except (ValueError, TypeError, OverflowError):
+            return None
+
+
+async def generate_text(body: dict, settings: Settings,
+                        transport: httpx.AsyncBaseTransport | None = None) -> str:
+    key = settings.gemini_api_key.strip()
+    if not key or key == "replace_with_your_google_ai_studio_key":
+        raise GemmaError("Gemma is not configured. Add GEMINI_API_KEY to backend/.env.", 503)
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", settings.gemma_model):
+        raise GemmaError("Invalid configured model name.", 500)
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{settings.gemma_model}:generateContent"
+    request_id = request_context.get() or uuid.uuid4().hex[:12]
+    start = time.monotonic()
+    retries = min(2, max(0, settings.gemma_max_retries))
+    async with httpx.AsyncClient(timeout=httpx.Timeout(settings.gemma_timeout_seconds, connect=10), transport=transport) as client:
+        for attempt in range(retries + 1):
+            response = None
+            category = "ok"
+            try:
+                response = await client.post(url, headers={"x-goog-api-key": key, "Content-Type": "application/json"}, json=body)
+            except httpx.TimeoutException:
+                category = "timeout"
+            except httpx.RequestError:
+                category = "network"
+            status = response.status_code if response is not None else None
+            if status != 200 and status is not None:
+                category = "quota" if status == 429 else "provider"
+            logger.info("request_id=%s duration=%.2f api_status=%s retry_count=%d category=%s",
+                        request_id, time.monotonic() - start, status, attempt, category)
+            if status == 200:
+                break
+            retryable = status in {500, 502, 503, 504} or category in {"network", "timeout"}
+            delay = min(8.0, 0.5 * 2 ** attempt + random.uniform(0, 0.3))
+            if status == 429:
+                # Retry only with explicit short server guidance; never churn quota errors.
+                guidance = retry_after_seconds(response.headers.get("Retry-After"))
+                retryable = guidance is not None and guidance <= 8
+                delay = guidance if retryable else delay
+            if attempt < retries and retryable:
+                await asyncio.sleep(delay)
+                continue
+            if category == "timeout":
+                raise GemmaError("The Gemma request timed out. Please try again.", 504)
+            if category == "network":
+                raise GemmaError("Cannot reach Google's Gemma API. Check your network and try again.", 502)
+            if status in {401, 403}:
+                raise GemmaError("Gemma API access denied. Check the API key and model permissions.", 502)
+            if status == 429:
+                raise GemmaError("Gemma API quota or rate limit reached. Try again later.", 429)
+            if status == 404:
+                raise GemmaError("The configured Gemma model is not accessible to this API key.", 502)
+            raise GemmaError(f"Gemma API returned HTTP {status}. Please retry later.", 502)
+    try:
+        candidates = response.json().get("candidates", [])
+        text = "".join(part.get("text", "") for part in candidates[0]["content"].get("parts", [])
+                       if isinstance(part, dict) and not part.get("thought", False))
+    except (IndexError, KeyError, AttributeError, ValueError, TypeError) as exc:
+        raise GemmaError("Gemma returned an empty or unexpected response. Please try again.") from exc
+    if not text.strip():
+        raise GemmaError("Gemma did not return document analysis. Please try again.")
+    return text
 
 
 async def analyze_with_gemma(
@@ -131,44 +226,7 @@ async def analyze_with_gemma(
         "contents": [{"role": "user", "parts": parts}],
         "generationConfig": {"temperature": 0.15, "maxOutputTokens": 7000},
     }
-    model = settings.gemma_model
-    if not re.fullmatch(r"[A-Za-z0-9_.-]+", model):
-        raise GemmaError("Invalid configured model name.", 500)
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-
-    try:
-        async with httpx.AsyncClient(timeout=100.0, transport=transport) as client:
-            response = await client.post(
-                url,
-                headers={"x-goog-api-key": key, "Content-Type": "application/json"},
-                json=body,
-            )
-    except httpx.TimeoutException as exc:
-        raise GemmaError("The Gemma request timed out. Please try again.", 504) from exc
-    except httpx.RequestError as exc:
-        raise GemmaError("Cannot reach Google's Gemma API. Check your network and try again.", 502) from exc
-
-    if response.status_code != 200:
-        if response.status_code in (401, 403):
-            raise GemmaError("Gemma API access denied. Check the API key and model permissions.", 502)
-        if response.status_code == 429:
-            raise GemmaError("Gemma API quota or rate limit reached. Try again later.", 429)
-        if response.status_code == 404:
-            raise GemmaError("The configured Gemma model is not accessible to this API key.", 502)
-        raise GemmaError(f"Gemma API returned HTTP {response.status_code}.", 502)
-
-    try:
-        response_data = response.json()
-        candidates = response_data.get("candidates", [])
-        text = "".join(
-            part.get("text", "")
-            for part in candidates[0]["content"].get("parts", [])
-            if isinstance(part, dict)
-        )
-    except (IndexError, KeyError, AttributeError, ValueError, TypeError) as exc:
-        raise GemmaError("Gemma returned an empty or unexpected response. Please try again.") from exc
-    if not text.strip():
-        raise GemmaError("Gemma did not return document analysis. Please try again.")
+    text = await generate_text(body, settings, transport)
     result = parse_gemma_output(text, len(pages))
     result.eligibility_overall, result.criteria = assess_all(result.criteria, profile)
     return result

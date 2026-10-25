@@ -1,23 +1,28 @@
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import type { ChangeEvent, DragEvent, ReactNode } from 'react';
 import {
-  ArrowRight, ArrowUpRight, BookOpen, CalendarDays, Check, CheckCheck,
+  ArrowRight, ArrowUpRight, BookOpen, CalendarDays, Check,
   CheckCircle2, ChevronRight, CircleHelp, ClipboardCheck, Clock3,
   CloudUpload, Download, ExternalLink, FileImage,
   FileSearch2, FileText, FolderOpen, GraduationCap, Info, Languages,
   Layers3, LoaderCircle, LockKeyhole, Menu, RotateCcw, ScanLine,
   ShieldCheck, Sparkles, UploadCloud, WandSparkles, X, AlertTriangle,
 } from 'lucide-react';
-import { analyzeDocument, healthCheck, loadSampleFile } from './lib/api';
-import type { Analysis, Health, Profile } from './lib/types';
-import SourceTag from './components/SourceTag';
+import { analyzeDocument, deleteSession, healthCheck, loadSampleFile } from './lib/api';
+import type { Analysis, Health, Profile, SourceFact } from './lib/types';
+import SourceTag, { EvidenceContext } from './components/SourceTag';
+import EligibilitySummary from './components/EligibilitySummary';
+import ScholarshipChat from './components/ScholarshipChat';
+import ApplicationRoadmap from './components/ApplicationRoadmap';
+import { friendlyError, t } from './lib/i18n';
+const DocumentViewer = lazy(() => import('./components/DocumentViewer'));
 
-type Tab = 'overview' | 'eligibility' | 'documents' | 'roadmap';
+type Tab = 'overview' | 'eligibility' | 'documents' | 'roadmap' | 'assistant';
 type Language = 'en' | 'kn';
 
 const startProfile: Profile = {
-  education_level: 'Undergraduate', state: 'Karnataka', category: 'Not specified',
-  annual_income: '', percentage: '',
+  education_level: 'Not specified', state: 'Not specified', category: 'Not specified',
+  annual_income: '', percentage: '', age: '', study_mode: 'Not specified',
 };
 const maximumSize = 8 * 1024 * 1024;
 
@@ -101,6 +106,8 @@ export default function App() {
   const [tab, setTab] = useState<Tab>('overview');
   const [doneDocuments, setDoneDocuments] = useState<string[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [evidence, setEvidence] = useState<SourceFact | null>(null);
+  const [viewerOpen, setViewerOpen] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const resultsRef = useRef<HTMLElement>(null);
 
@@ -115,16 +122,19 @@ export default function App() {
   }, [file]);
 
   const chooseFile = (selected: File | undefined) => {
+    if (loading) return;
     if (!selected) return;
     if (selected.size > maximumSize) { setError('This file exceeds the 8 MB limit.'); return; }
     const supported = ['application/pdf', 'image/jpeg', 'image/png'].includes(selected.type)
       || /\.(pdf|jpe?g|png)$/i.test(selected.name);
     if (!supported) { setError('Please choose a PDF, JPG, or PNG file.'); return; }
     setFile(selected);
+    if (analysis?.session_id) void deleteSession(analysis.session_id).catch(() => {});
     setAnalysis(null);
     setDoneDocuments([]);
     setError('');
     setTab('overview');
+    setViewerOpen(false); setEvidence(null);
   };
   const onDrop = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault(); setIsDragging(false);
@@ -136,7 +146,7 @@ export default function App() {
     catch { setError('The sample could not be loaded. Check that the development server is running.'); }
   };
   const setField = (field: keyof Profile, value: string) =>
-    setProfile(p => ({ ...p, [field]: value }));
+    !loading && setProfile(p => ({ ...p, [field]: value }));
   const submit = async () => {
     if (!file) { setError('Upload a notice or choose a sample first.'); return; }
     if (profile.percentage !== '' && !(Number(profile.percentage) >= 0 && Number(profile.percentage) <= 100)) {
@@ -145,10 +155,15 @@ export default function App() {
     if (profile.annual_income !== '' && Number(profile.annual_income) < 0) {
       setError('Annual income cannot be negative.'); return;
     }
-    setError(''); setLoading(true); setAnalysis(null);
+    if (profile.age !== '' && (!Number.isInteger(Number(profile.age)) || Number(profile.age) < 0 || Number(profile.age) > 120)) {
+      setError('Age must be a whole number between 0 and 120.'); return;
+    }
+    if (analysis?.session_id) void deleteSession(analysis.session_id).catch(() => {});
+    setError(''); setLoading(true); setAnalysis(null); setEvidence(null);
     try {
       const result = await analyzeDocument(file, profile);
       setAnalysis(result);
+      setViewerOpen(true);
       setDoneDocuments([]);
       setTab('overview');
       setHealth(h => h ? { ...h, gemma_configured: true } : h);
@@ -158,7 +173,10 @@ export default function App() {
     } finally { setLoading(false); }
   };
   const reset = () => {
+    if (loading) return;
+    if (analysis?.session_id) void deleteSession(analysis.session_id).catch(() => {});
     setFile(null); setError(''); setAnalysis(null);
+    setViewerOpen(false); setEvidence(null);
     setDoneDocuments([]); setTab('overview');
     if (fileInput.current) fileInput.current.value = '';
   };
@@ -166,6 +184,7 @@ export default function App() {
     existing.includes(name) ? existing.filter(x => x !== name) : [...existing, name]);
 
   return (
+    <EvidenceContext.Provider value={{ language, open: fact => { setEvidence({ ...fact }); setViewerOpen(true); } }}>
     <div className="app-shell">
       {sidebarOpen && <button className="mobile-scrim" aria-label="Close navigation" onClick={() => setSidebarOpen(false)} />}
       <aside className={`sidebar${sidebarOpen ? ' visible' : ''}`}>
@@ -194,7 +213,7 @@ export default function App() {
             <p>Track 1 · Best Use of Gemma 4</p>
             <div className="hack-by">Crafted by <b>Avengineers</b></div>
           </div>
-          <div className="sidebar-footer"><ShieldCheck size={15} /> Privacy-first processing <span className="footer-version">v1.0</span></div>
+          <div className="sidebar-footer"><ShieldCheck size={15} /> Temporary processing <span className="footer-version">v3.0</span></div>
         </div>
       </aside>
 
@@ -205,6 +224,7 @@ export default function App() {
             <span className="breadcrumb">Workspace</span><ChevronRight size={15} className="breadcrumb-arrow" /><span className="breadcrumb-current">Dashboard</span>
           </div>
           <div className="topbar-right">
+            <span className="language-switch" aria-label={t(language, 'Output language')}><button aria-pressed={language === 'en'} className={language === 'en' ? 'current' : ''} onClick={() => setLanguage('en')}>EN</button><button aria-pressed={language === 'kn'} className={language === 'kn' ? 'current' : ''} onClick={() => setLanguage('kn')}>ಕನ್ನಡ</button></span>
             <span className="model-chip"><span className="cyan-point" /> Powered by <b>Gemma 4</b></span>
             <span className="top-avatar" title="Avengineers">A</span>
           </div>
@@ -240,12 +260,12 @@ export default function App() {
 
           <section id="analyzer" className="analyzer-section">
             <div className="section-heading">
-              <div><span className="section-kicker">01 / DOCUMENT WORKSPACE</span><h2>Analyze a scholarship notice</h2><p>Upload a notice and add optional information to personalize the guidance.</p></div>
-              <Pill tone="quiet"><LockKeyhole size={13} /> No upload history</Pill>
+              <div><span className="section-kicker">01 / DOCUMENT WORKSPACE</span><h2>{t(language, 'Analyze a scholarship notice')}</h2><p>{language === 'kn' ? 'ಪ್ರಕಟಣೆ ಅಪ್‌ಲೋಡ್ ಮಾಡಿ; ವೈಯಕ್ತಿಕ ಮಾರ್ಗದರ್ಶನಕ್ಕಾಗಿ ಐಚ್ಛಿಕ ಮಾಹಿತಿ ನೀಡಿ.' : 'Upload a notice and add optional information to personalize the guidance.'}</p></div>
+              <Pill tone="quiet"><LockKeyhole size={13} /> {t(language, 'No upload history')}</Pill>
             </div>
             <div className="form-grid">
               <div className="card upload-card">
-                <div className="card-heading"><div className="card-number">01</div><div><h3>Your document</h3><p>Upload the original scholarship notice.</p></div></div>
+                <div className="card-heading"><div className="card-number">01</div><div><h3>{t(language, 'Your document')}</h3><p>{t(language, 'Upload the original scholarship notice.')}</p></div></div>
                 <input ref={fileInput} className="sr-only" type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" onChange={(e: ChangeEvent<HTMLInputElement>) => chooseFile(e.target.files?.[0])} aria-label="Choose a scholarship notice" />
                 {!file ? (
                   <div className={`dropzone${isDragging ? ' dragging' : ''}`} role="button" tabIndex={0}
@@ -254,8 +274,8 @@ export default function App() {
                     onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
                     onDragLeave={() => setIsDragging(false)} onDrop={onDrop}>
                     <div className="upload-image"><CloudUpload size={30} strokeWidth={1.6} /></div>
-                    <strong>Drag & drop your file here</strong>
-                    <span>or <u>browse from your device</u></span>
+                    <strong>{t(language, 'Drag & drop your file here')}</strong>
+                    <span>{language === 'kn' ? 'ಅಥವಾ' : 'or'} <u>{t(language, 'browse from your device')}</u></span>
                     <div className="upload-formats"><span>PDF</span><span>JPG</span><span>PNG</span><span>MAX 8 MB</span></div>
                   </div>
                 ) : (
@@ -269,61 +289,83 @@ export default function App() {
                 )}
                 <div className="sample-area"><span className="sample-title">OR TRY A SAMPLE</span>
                   <div className="sample-row">
-                    <button className="sample-choice" onClick={() => void loadExample('pdf')}><FileText size={17}/><span>Scholarship PDF</span><ArrowUpRight size={13}/></button>
-                    <button className="sample-choice" onClick={() => void loadExample('image')}><FileImage size={17}/><span>Notice image</span><ArrowUpRight size={13}/></button>
+                    <button className="sample-choice" onClick={() => void loadExample('pdf')}><FileText size={17}/><span>{t(language, 'Scholarship PDF')}</span><ArrowUpRight size={13}/></button>
+                    <button className="sample-choice" onClick={() => void loadExample('image')}><FileImage size={17}/><span>{t(language, 'Notice image')}</span><ArrowUpRight size={13}/></button>
                   </div>
                   <small>Samples are fictional. Analysis still uses the live Gemma API.</small>
                 </div>
               </div>
               <div className="card details-card">
-                <div className="card-heading"><div className="card-number">02</div><div><h3>Student profile <span className="optional-tag">OPTIONAL</span></h3><p>Helps compare eligibility requirements.</p></div></div>
+                <div className="card-heading"><div className="card-number">02</div><div><h3>{t(language, 'Student profile')} <span className="optional-tag">{language === 'kn' ? 'ಐಚ್ಛಿಕ' : 'OPTIONAL'}</span></h3><p>{t(language, 'Helps compare eligibility requirements.')}</p></div></div>
                 <div className="form-fields">
                   <div className="field-row">
-                    <Field label="Education level" id="education"><select id="education" value={profile.education_level} onChange={e => setField('education_level', e.target.value)}><option>Not specified</option><option>PUC / Class 12</option><option>Undergraduate</option><option>Postgraduate</option><option>Diploma</option><option>Other</option></select></Field>
-                    <Field label="State of residence" id="state"><select id="state" value={profile.state} onChange={e => setField('state', e.target.value)}><option>Not specified</option><option>Karnataka</option><option>Maharashtra</option><option>Tamil Nadu</option><option>Kerala</option><option>Andhra Pradesh</option><option>Telangana</option><option>Other</option></select></Field>
+                    <Field label={t(language, 'Education level')} id="education"><select id="education" value={profile.education_level} onChange={e => setField('education_level', e.target.value)}><option>Not specified</option><option>PUC / Class 12</option><option>Undergraduate</option><option>Postgraduate</option><option>Diploma</option><option>Other</option></select></Field>
+                    <Field label={t(language, 'State of residence')} id="state"><select id="state" value={profile.state} onChange={e => setField('state', e.target.value)}><option>Not specified</option><option>Karnataka</option><option>Maharashtra</option><option>Tamil Nadu</option><option>Kerala</option><option>Andhra Pradesh</option><option>Telangana</option><option>Other</option></select></Field>
                   </div>
                   <div className="field-row">
-                    <Field label="Annual family income (₹)" id="income"><input id="income" type="number" min="0" step="1" placeholder="e.g. 250000" value={profile.annual_income} onChange={e => setField('annual_income', e.target.value)}/></Field>
-                    <Field label="Previous marks (%)" id="marks"><input id="marks" type="number" min="0" max="100" step="0.01" placeholder="e.g. 85" value={profile.percentage} onChange={e => setField('percentage', e.target.value)}/></Field>
+                    <Field label={t(language, 'Annual family income (₹)')} id="income"><input id="income" type="number" min="0" step="1" placeholder="e.g. 250000" value={profile.annual_income} onChange={e => setField('annual_income', e.target.value)}/></Field>
+                    <Field label={t(language, 'Previous marks (%)')} id="marks"><input id="marks" type="number" min="0" max="100" step="0.01" placeholder="e.g. 85" value={profile.percentage} onChange={e => setField('percentage', e.target.value)}/></Field>
                   </div>
-                  <Field label="Category" id="category"><select id="category" value={profile.category} onChange={e => setField('category', e.target.value)}><option>Not specified</option><option>General</option><option>OBC</option><option>SC</option><option>ST</option><option>EWS</option><option>Prefer not to say</option></select></Field>
+                  <Field label={t(language, 'Category')} id="category"><select id="category" value={profile.category} onChange={e => setField('category', e.target.value)}><option>Not specified</option><option>General</option><option>OBC</option><option>SC</option><option>ST</option><option>EWS</option><option>Prefer not to say</option></select></Field>
+                  <div className="field-row"><Field label={t(language, 'Age')} id="age"><input id="age" type="number" min="0" max="120" step="1" value={profile.age} onChange={e => setField('age', e.target.value)}/></Field><Field label={t(language, 'Study mode')} id="study-mode"><select id="study-mode" value={profile.study_mode} onChange={e => setField('study_mode', e.target.value)}><option>Not specified</option><option>Full-time</option><option>Part-time</option><option>Distance</option></select></Field></div>
                 </div>
-                <div className="profile-footnote"><Info size={15}/><span>Only enter details you're comfortable sharing. The document and any supplied details are sent to Google's hosted model API, but not saved by this app.</span></div>
+                <div className="profile-footnote"><Info size={15}/><span>{language === 'kn' ? 'ನೀವು ನೀಡಿದ ದಾಖಲೆ ಮತ್ತು ಮಾಹಿತಿ Google API ಗೆ ಹೋಗುತ್ತದೆ. ಸಹಾಯಕಕ್ಕಾಗಿ ಸರ್ವರ್ ಮೆಮೊರಿಯಲ್ಲಿ 20 ನಿಮಿಷಗಳವರೆಗೆ ಇರುತ್ತದೆ.' : 'The notice and supplied details go to Google’s model API. Document context is kept in server memory for up to 20 minutes for chat; reset removes it early.'}</span></div>
               </div>
             </div>
             <div className="action-card">
               <div className="action-text"><div className="magic-icon"><WandSparkles size={22}/></div><span><strong>Ready to see the bigger picture?</strong><small>Gemma 4 will read the notice and build actionable guidance.</small></span></div>
               <button className="analyze-btn" onClick={() => void submit()} disabled={loading}>
-                {loading ? <><LoaderCircle className="spinning" size={19}/> Analyzing…</> : <><Sparkles size={19}/> Analyze with Gemma 4 <ArrowRight size={17}/></>}
+                {loading ? <><LoaderCircle className="spinning" size={19}/> {t(language, 'Analyzing…')}</> : <><Sparkles size={19}/> {t(language, 'Analyze with Gemma 4')} <ArrowRight size={17}/></>}
               </button>
             </div>
             {healthError && <div className="inline-notice warning"><AlertTriangle size={18}/><span>Backend is unreachable. Start FastAPI on port 8000 and refresh.</span></div>}
             {health && !health.gemma_configured && <div className="inline-notice warning"><Info size={18}/><span>Gemma is not configured yet. Add your API key to <code>backend/.env</code>. Upload and preview work without it; analysis requires a key.</span></div>}
-            {error && <div role="alert" className="inline-notice error"><AlertTriangle size={18}/><span>{error}</span><button onClick={() => setError('')} aria-label="Dismiss error"><X size={16}/></button></div>}
+            {error && <div role="alert" className="inline-notice error"><AlertTriangle size={18}/><span>{friendlyError(language, error)}</span><button disabled={loading} onClick={() => void submit()}>{t(language, 'Retry')}</button><button onClick={() => setError('')} aria-label="Dismiss error"><X size={16}/></button></div>}
             {loading && <div className="loading-card" role="status"><div className="loading-visual"><ScanLine size={28}/></div><div><strong>Gemma 4 is reading your notice</strong><p>Analyzing uploaded pages, translating instructions, and comparing requirements. Processing time depends on document length and API availability.</p></div><LoaderCircle className="spinning" size={24}/></div>}
           </section>
 
           <section className="results-section" id="results" ref={resultsRef}>
-            <div className="section-heading results-heading"><div><span className="section-kicker">02 / YOUR INSIGHTS</span><h2>Analysis results</h2><p>Clear takeaways, cited details, and actionable next steps.</p></div>
-              {analysis && <button className="reset-btn" onClick={reset}><RotateCcw size={15}/> New analysis</button>}
+            <div className="section-heading results-heading"><div><span className="section-kicker">02 / YOUR INSIGHTS</span><h2>{t(language, 'Analysis results')}</h2><p>{language === 'kn' ? 'ಸ್ಪಷ್ಟ ವಿವರಗಳು, ಮೂಲ ಉಲ್ಲೇಖಗಳು ಮತ್ತು ಮುಂದಿನ ಕ್ರಮಗಳು.' : 'Clear takeaways, cited details, and actionable next steps.'}</p></div>
+              {analysis && <button className="reset-btn" onClick={reset}><RotateCcw size={15}/> {t(language, 'New analysis')}</button>}
             </div>
             {!analysis ? (
               <div className="results-empty card"><div className="empty-graphic"><FolderOpen size={39}/><span className="empty-star">✦</span></div><strong>Your clarity starts here</strong><p>Upload a scholarship notice above to see requirements, deadlines, eligibility guidance, and a document checklist.</p><a href="#analyzer">Analyze your first document <ArrowRight size={16}/></a></div>
             ) : (
-              <div className="result-wrapper">
+              <div className={`evidence-workspace${viewerOpen ? ' with-viewer' : ''}`}>
+              {viewerOpen && previewUrl && <Suspense fallback={<p role="status">Loading viewer…</p>}><DocumentViewer url={previewUrl} isPdf={file?.type === 'application/pdf' || /\.pdf$/i.test(file?.name ?? '')} fact={evidence} language={language} close={() => setViewerOpen(false)}/></Suspense>}
+              <div className="result-wrapper analysis-panel">
                 <div className="result-banner"><div><div className="result-eyebrow"><CheckCircle2 size={15}/> ANALYSIS COMPLETE <span>· {analysis.pages_analyzed} page{analysis.pages_analyzed !== 1 ? 's' : ''} scanned</span></div><h3>{analysis.title}</h3><p>{analysis.provider || 'Provider not clearly identified'}</p></div><div className="result-banner-right"><span>MODEL USED</span><strong>{analysis.model_used}</strong><small>{analysis.processing_seconds.toFixed(1)}s processing · {analysis.confidence} model-estimated confidence</small></div></div>
                 <div className="result-tabs" role="tablist" aria-label="Analysis sections">
-                  {([['overview', 'Overview'], ['eligibility', 'Eligibility'], ['documents', `Documents (${analysis.documents.length})`], ['roadmap', 'Action plan']] as const).map(([key, label]) =>
-                    <button key={key} role="tab" aria-selected={tab === key} className={tab === key ? 'active' : ''} onClick={() => setTab(key)}>{label}</button>
+                  {([['overview', 'Overview'], ['eligibility', 'Eligibility'], ['documents', 'Documents'], ['roadmap', 'Action plan'], ['assistant', 'Assistant']] as const).map(([key, label]) =>
+                    <button key={key} role="tab" aria-selected={tab === key} className={tab === key ? 'active' : ''} onClick={() => setTab(key)}>{t(language, label)}</button>
                   )}
-                  <span className="language-switch" aria-label="Output language"><Languages size={16}/><button className={language === 'en' ? 'current' : ''} onClick={() => setLanguage('en')} aria-pressed={language === 'en'}>EN</button><button className={language === 'kn' ? 'current' : ''} onClick={() => setLanguage('kn')} aria-pressed={language === 'kn'}>ಕನ್ನಡ</button></span>
+                  {!viewerOpen && <button title={t(language, 'View evidence')} aria-label={t(language, 'View evidence')} onClick={() => setViewerOpen(true)}><BookOpen size={16}/></button>}
                 </div>
-                {tab === 'overview' && <div className="overview-grid"><div className="card result-summary"><div className="result-card-heading"><BookOpen size={18}/><h4>What this means</h4></div><p className={language === 'kn' ? 'kannada-text' : ''}>{language === 'kn' ? analysis.summary_kn : analysis.summary_en}</p><div className="summary-meta"><span><FileText size={14}/> {analysis.filename}</span><span><ShieldCheck size={14}/> Verify against source</span></div></div><div className="card deadline-card"><div className="result-card-heading"><CalendarDays size={18}/><h4>Application deadline</h4></div><strong>{analysis.deadline.date_text ?? 'Not found in notice'}</strong><SourceTag evidence={analysis.deadline.evidence} page={analysis.deadline.page}/></div></div>}
-                {tab === 'eligibility' && <div className="card detail-list"><div className="result-card-heading"><GraduationCap size={18}/><h4>Eligibility requirements</h4></div><div className="eligibility-overall" role="status"><strong>{analysis.eligibility_overall === 'appears_to_meet_extracted' ? (language === 'kn' ? 'ಪಡೆಯಲಾದ ನಿಯಮಗಳನ್ನು ಪೂರೈಸಿದಂತೆ ಕಾಣುತ್ತದೆ' : 'Appears to meet extracted rules') : analysis.eligibility_overall === 'possible_mismatch' ? (language === 'kn' ? 'ಸಂಭಾವ್ಯ ಹೊಂದಾಣಿಕೆ ಇಲ್ಲ' : 'Possible eligibility mismatch') : (language === 'kn' ? 'ಹೆಚ್ಚಿನ ಪರಿಶೀಲನೆ ಅಗತ್ಯ' : 'Needs verification')}</strong><p>{language === 'kn' ? 'ಇದು ಅಧಿಕೃತ ಅರ್ಹತಾ ನಿರ್ಣಯವಲ್ಲ. ಮೂಲ ಪ್ರಕಟಣೆ ಮತ್ತು ಅಧಿಕೃತ ವೆಬ್‌ಸೈಟ್ ಪರಿಶೀಲಿಸಿ.' : 'Preliminary only. Gemma-extracted rules may be incomplete; verify quotations in the original notice and confirm with the official provider.'}</p></div><p className="detail-intro">These are tentative comparisons based on the information you supplied, not an official eligibility decision.</p>{analysis.criteria.length ? analysis.criteria.map((item, index) => <div className="criterion" key={index}><div className={`criterion-icon ${item.status}`}><StatusIcon status={item.status}/></div><div><strong>{item.requirement}</strong><span className={`assessment ${item.status}`}>{item.status === 'likely_meets' ? (language === 'kn' ? 'ಪೂರೈಸಿದಂತೆ ಕಾಣುತ್ತದೆ' : 'Appears to meet') : item.status === 'may_not_meet' ? (language === 'kn' ? 'ಹೊಂದಿಕೆಯಾಗದಿರಬಹುದು' : 'Possible mismatch') : (language === 'kn' ? 'ಪರಿಶೀಲನೆ ಅಗತ್ಯ' : 'Needs verification')}</span><p className={language === 'kn' ? 'kannada-text' : ''}>{language === 'kn' ? item.explanation_kn : item.explanation_en}</p><SourceTag evidence={item.evidence} page={item.page}/></div></div>) : <p className="detail-intro">No eligibility criteria could be confidently extracted. Check the official notice.</p>}</div>}
-                {tab === 'documents' && <div className="card detail-list"><div className="documents-header"><div className="result-card-heading"><ClipboardCheck size={18}/><h4>Required documents</h4></div><button className="export-btn" onClick={() => exportChecklist(analysis)}><Download size={16}/> Download checklist</button></div><p className="detail-intro">Tick off documents as you prepare them. This checklist is stored only in the current browser session.</p>{analysis.documents.length ? <><div className="document-progress"><div style={{ width: `${doneDocuments.length / analysis.documents.length * 100}%` }}/></div><div className="document-count">{doneDocuments.length} of {analysis.documents.length} completed</div>{analysis.documents.map((doc, index) => <label className={`document-row${doneDocuments.includes(`${index}`) ? ' completed' : ''}`} key={index}><input type="checkbox" checked={doneDocuments.includes(`${index}`)} onChange={() => toggleDone(`${index}`)}/><span className="custom-checkbox"><Check size={14}/></span><span className="document-name"><strong>{doc.name}</strong><SourceTag evidence={doc.evidence} page={doc.page}/></span></label>)}</> : <p className="detail-intro">No document requirements were clearly extracted. Review the notice manually.</p>}</div>}
-                {tab === 'roadmap' && <div className="card detail-list"><div className="result-card-heading"><CheckCheck size={18}/><h4>Your next steps</h4></div>{analysis.steps.length ? <div className="roadmap">{analysis.steps.map((step, index) => <div className="roadmap-step" key={index}><span className="roadmap-number">{String(index + 1).padStart(2, '0')}</span><div><strong>{step.title}</strong><p className={language === 'kn' ? 'kannada-text' : ''}>{language === 'kn' ? step.detail_kn : step.detail_en}</p></div></div>)}</div> : <p className="detail-intro">No specific application steps were identified.</p>}</div>}
-                {(analysis.unknowns.length > 0 || analysis.warnings.length > 0) && <div className="review-warning"><AlertTriangle size={19}/><div><strong>Before you apply, double-check these details</strong><ul>{[...analysis.unknowns, ...analysis.warnings].map((warning, index) => <li key={index}>{warning}</li>)}</ul></div></div>}
-                <div className="result-disclaimer"><ShieldCheck size={17}/>{analysis.disclaimer} <span>Request ID: {analysis.request_id}</span></div>
+                <EligibilitySummary criteria={analysis.criteria} language={language}/>
+                {tab === 'overview' && <div className="overview-grid">
+                  <div className="result-summary"><div className="result-card-heading"><BookOpen size={18}/><h4>{t(language, 'What this means')}</h4></div><p className={language === 'kn' ? 'kannada-text' : ''}>{language === 'kn' ? analysis.summary_kn : analysis.summary_en}</p>
+                    {(analysis.summary_sources ?? []).map((source, i) => <SourceTag key={i} {...source}/>)}
+                    <div className="summary-meta"><span><FileText size={14}/> {analysis.filename}</span></div></div>
+                  <div className="deadline-card"><div className="result-card-heading"><CalendarDays size={18}/><h4>{t(language, 'Application deadline')}</h4></div><strong>{analysis.deadline.date_text ?? t(language, 'Deadline not found in the uploaded document. Verify it through the official scholarship provider.')}</strong><SourceTag {...analysis.deadline}/></div>
+                </div>}
+                {tab === 'eligibility' && <div className="detail-list"><div className="result-card-heading"><GraduationCap size={18}/><h4>{t(language, 'Eligibility requirements')}</h4></div>
+                  <div className="eligibility-overall" role="status"><strong>{analysis.eligibility_overall === 'appears_to_meet_extracted' ? (language === 'kn' ? 'ಪಡೆಯಲಾದ ನಿಯಮಗಳನ್ನು ಪೂರೈಸಿದಂತೆ ಕಾಣುತ್ತದೆ' : 'Appears to meet extracted rules') : analysis.eligibility_overall === 'possible_mismatch' ? (language === 'kn' ? 'ಸಂಭಾವ್ಯ ಹೊಂದಾಣಿಕೆ ಇಲ್ಲ' : 'Possible eligibility mismatch') : t(language, 'Needs verification')}</strong><p>{language === 'kn' ? 'ಇದು ಅಧಿಕೃತ ಅರ್ಹತಾ ನಿರ್ಣಯವಲ್ಲ. ಮೂಲ ಪ್ರಕಟಣೆ ಮತ್ತು ಅಧಿಕೃತ ಸಂಸ್ಥೆಯೊಂದಿಗೆ ಪರಿಶೀಲಿಸಿ.' : 'Preliminary only. Extracted rules may be incomplete; confirm with the official provider.'}</p></div>
+                  {analysis.criteria.length ? analysis.criteria.map((item, index) => <div className="criterion" key={index}><div className={`criterion-icon ${item.status}`}><StatusIcon status={item.status}/></div><div><strong>{language === 'kn' ? item.requirement_kn || item.requirement : item.requirement}</strong>
+                    <span className={`assessment ${item.status}`}>{t(language, item.status === 'likely_meets' ? 'Satisfied' : item.status === 'may_not_meet' ? 'Possible mismatches' : 'Needs verification')}</span>
+                    <p>{t(language, 'Extracted condition')}: {item.rule ? `${({ lt: '<', lte: '≤', gt: '>', gte: '≥', eq: '=', one_of: '∈' } as Record<string, string>)[item.rule.operator] ?? '?'} ${item.rule.value_number ?? item.rule.values.join(', ')}` : item.evidence || t(language, 'Needs verification')}</p>
+                    <p>{t(language, 'Student value')}: {item.student_value === null || item.student_value === undefined || item.student_value === 'Not specified' ? t(language, 'Not supplied') : String(item.student_value)}</p>
+                    <p className={language === 'kn' ? 'kannada-text' : ''}>{language === 'kn' ? item.explanation_kn : item.explanation_en}</p><SourceTag {...item}/></div></div>) : <p>{t(language, 'No eligibility criteria could be confidently extracted. Check the official notice.')}</p>}
+                </div>}
+                {tab === 'documents' && <div className="detail-list"><div className="documents-header"><div className="result-card-heading"><ClipboardCheck size={18}/><h4>{t(language, 'Required documents')}</h4></div><button className="export-btn" onClick={() => exportChecklist(analysis)}><Download size={16}/>{t(language, 'Download checklist')}</button></div>
+                  <p>{t(language, 'Checklist completion does not submit an application.')}</p>
+                  {analysis.documents.length ? <><div className="document-progress"><div style={{ width: `${doneDocuments.length / analysis.documents.length * 100}%` }}/></div>{analysis.documents.map((doc, index) => <div className={`document-item${doneDocuments.includes(`${index}`) ? ' completed' : ''}`} key={index}>
+                    <label><input type="checkbox" checked={doneDocuments.includes(`${index}`)} onChange={() => toggleDone(`${index}`)}/><strong>{language === 'kn' ? doc.name_kn || doc.name : doc.name}</strong></label><SourceTag {...doc}/></div>)}</> : <p>{t(language, 'No document requirements were clearly extracted. Review the notice manually.')}</p>}
+                </div>}
+                {tab === 'roadmap' && <ApplicationRoadmap key={analysis.request_id} sessionId={analysis.request_id} tasks={analysis.roadmap ?? []} language={language}/>}
+                <div hidden={tab !== 'assistant'}><ScholarshipChat key={analysis.session_id} sessionId={analysis.session_id} language={language}/></div>
+                {(analysis.unknowns.length > 0 || analysis.warnings.length > 0) && <div className="review-warning"><AlertTriangle size={19}/><div><strong>{t(language, 'Before you apply, double-check these details')}</strong><ul>{(language === 'kn' ? [...(analysis.unknowns_kn?.length ? analysis.unknowns_kn : analysis.unknowns), ...(analysis.warnings_kn?.length ? analysis.warnings_kn : analysis.warnings)] : [...analysis.unknowns, ...analysis.warnings]).map((warning, index) => <li key={index}>{warning}</li>)}</ul></div></div>}
+                <div className="result-disclaimer"><ShieldCheck size={17}/>{language === 'kn' ? 'AI ಮಾರ್ಗದರ್ಶನ ಮಾತ್ರ. ಮೂಲ ಪ್ರಕಟಣೆ ಮತ್ತು ಅಧಿಕೃತ ಸಂಸ್ಥೆಯೊಂದಿಗೆ ಪರಿಶೀಲಿಸಿ.' : analysis.disclaimer} <span>Request ID: {analysis.request_id}</span></div>
+              </div>
               </div>
             )}
           </section>
@@ -334,5 +376,6 @@ export default function App() {
       </div>
       <div className="floating-status"><StatusCard health={health}/></div>
     </div>
+    </EvidenceContext.Provider>
   );
 }

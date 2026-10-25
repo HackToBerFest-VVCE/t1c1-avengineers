@@ -1,12 +1,20 @@
+import { createContext, useContext } from 'react';
 import { BookOpenText } from 'lucide-react';
+import type { Language, SourceFact } from '../lib/types';
+import { t } from '../lib/i18n';
+import SourceVerificationBadge from './SourceVerificationBadge';
 
-export default function SourceTag({ evidence, page }: { evidence: string | null; page: number | null }) {
-  if (!evidence && page === null) return <span className="no-evidence">No quoted evidence — verify manually</span>;
-  return (
-    <div className="source-tag" title="AI-proposed citation; verify against the original document">
+export const EvidenceContext = createContext<{ language: Language; open: (fact: SourceFact) => void }>({ language: 'en', open: () => {} });
+
+export default function SourceTag(fact: SourceFact) {
+  const { language, open } = useContext(EvidenceContext);
+  if (!fact.evidence && fact.page === null) return <span className="no-evidence">{t(language, 'No quoted evidence - verify manually')}</span>;
+  return <div className="source-fact">
+    <button type="button" className="source-tag" onClick={() => open(fact)} title={t(language, 'View evidence')}>
       <BookOpenText size={13} aria-hidden="true" />
-      <span>{page !== null ? `Page ${page}` : 'Page unconfirmed'}</span>
-      {evidence ? <span className="source-quote">“{evidence}”</span> : null}
-    </div>
-  );
+      <span>{fact.page !== null ? `${t(language, 'Page')} ${fact.page}` : t(language, 'Page unconfirmed')}</span>
+      {fact.evidence && <span className="source-quote">“{fact.evidence}”</span>}
+    </button>
+    <SourceVerificationBadge verification={fact.verification} language={language}/>
+  </div>;
 }

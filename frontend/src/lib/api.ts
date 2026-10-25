@@ -1,11 +1,11 @@
-import type { Analysis, Health, Profile } from './types';
+import type { Analysis, Health, Profile, ChatAnswer, Language } from './types';
 
 export const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '');
 
 async function errorMessage(res: Response): Promise<string> {
   try {
-    const body: { detail?: string } = await res.json();
-    return body.detail || `Request failed with status ${res.status}.`;
+    const body: { detail?: unknown } = await res.json();
+    return typeof body.detail === 'string' ? body.detail : `Request failed with status ${res.status}.`;
   } catch { return `Request failed with status ${res.status}.`; }
 }
 
@@ -24,12 +24,25 @@ export async function analyzeDocument(file: File, profile: Profile): Promise<Ana
     category: profile.category,
     annual_income: profile.annual_income === '' ? null : Number(profile.annual_income),
     percentage: profile.percentage === '' ? null : Number(profile.percentage),
+    age: profile.age === '' ? null : Number(profile.age),
+    study_mode: profile.study_mode,
   }));
   // Let the browser set multipart boundaries; never set Content-Type manually.
   const res = await fetch(`${API_BASE}/api/analyze`, { method: 'POST', body: form });
   if (!res.ok) throw Error(await errorMessage(res));
   return await res.json() as Analysis;
 }
+
+async function sessionPost<T>(path: string, body: object): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, { method: 'POST',
+    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (!res.ok) throw Error(await errorMessage(res));
+  return await res.json() as T;
+}
+export const askScholarship = (session_id: string, question: string, language: Language) =>
+  sessionPost<ChatAnswer>('/api/chat', { session_id, question, language });
+export const resetChat = (session_id: string) => sessionPost('/api/chat/reset', { session_id });
+export const deleteSession = (session_id: string) => sessionPost('/api/session/delete', { session_id });
 
 export async function loadSampleFile(name: string): Promise<File> {
   const filename = name === 'pdf'

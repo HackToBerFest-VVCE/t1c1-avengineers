@@ -5,7 +5,7 @@ A purported document quote is model-provided and not independently OCR-verified.
 """
 from .schemas import Criterion, CriterionStatus, StudentProfile
 
-SUPPORTED_FIELDS = {'annual_income', 'percentage', 'state', 'category', 'education_level'}
+SUPPORTED_FIELDS = {'annual_income', 'percentage', 'state', 'category', 'education_level', 'age', 'study_mode'}
 NUMERIC_OPERATORS = {'lt', 'lte', 'gt', 'gte', 'eq'}
 
 
@@ -19,17 +19,22 @@ def assess_criterion(item: Criterion, student: StudentProfile) -> Criterion:
     item.explanation_en = 'Needs verification: no machine-checkable, source-backed rule and student fact.'
     item.explanation_kn = 'ಪರಿಶೀಲನೆ ಅಗತ್ಯ: ಮೂಲಾಧಾರವಿರುವ ನಿಯಮ ಅಥವಾ ವಿದ್ಯಾರ್ಥಿಯ ಮಾಹಿತಿ ಲಭ್ಯವಿಲ್ಲ.'
     rule = item.rule
+    item.student_value = getattr(student, rule.field, None) if rule else None
+    if item.verification is not None and item.verification.status != 'verified':
+        item.explanation_en = 'Needs verification: the quoted condition has not been matched to document text.'
+        item.explanation_kn = 'ಪರಿಶೀಲನೆ ಅಗತ್ಯ: ಉಲ್ಲೇಖಿತ ನಿಯಮವನ್ನು ದಾಖಲೆಯ ಪಠ್ಯದೊಂದಿಗೆ ದೃಢಪಡಿಸಲಾಗಿಲ್ಲ.'
+        return item
     if not rule or not item.evidence or not item.evidence.strip() or item.page is None:
         return item
     if rule.field not in SUPPORTED_FIELDS:
         return item
     actual = getattr(student, rule.field)
-    if actual is None or (isinstance(actual, str) and _normalize(actual) in {'', 'not specified'}):
+    if actual is None or (isinstance(actual, str) and _normalize(actual) in {'', 'not specified', 'prefer not to say', 'other'}):
         item.explanation_en = f'Needs verification: student {rule.field.replace("_", " ")} was not supplied.'
         item.explanation_kn = f'ಪರಿಶೀಲನೆ ಅಗತ್ಯ: ವಿದ್ಯಾರ್ಥಿಯ {rule.field.replace("_", " ")} ನೀಡಲಾಗಿಲ್ಲ.'
         return item
 
-    if rule.field in {'annual_income', 'percentage'}:
+    if rule.field in {'annual_income', 'percentage', 'age'}:
         if rule.operator not in NUMERIC_OPERATORS or not isinstance(rule.value_number, (float, int)):
             return item
         value = float(actual)

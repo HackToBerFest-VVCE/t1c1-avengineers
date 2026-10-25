@@ -15,6 +15,7 @@ class PageImage:
     data: bytes
     mime_type: str
     page: int
+    text: str = ""
 
 
 def _encode_page(image: Image.Image) -> tuple[bytes, str]:
@@ -58,7 +59,12 @@ def prepare_document(data: bytes, filename: str, max_pages: int = 5) -> list[Pag
                         try:
                             img = bitmap.to_pil()
                             encoded, mime = _encode_page(img)
-                            pages.append(PageImage(encoded, mime, index + 1))
+                            text_page = page.get_textpage()
+                            try:
+                                text = text_page.get_text_range()
+                            finally:
+                                text_page.close()
+                            pages.append(PageImage(encoded, mime, index + 1, text))
                         finally:
                             bitmap.close()
                     finally:
@@ -76,6 +82,8 @@ def prepare_document(data: bytes, filename: str, max_pages: int = 5) -> list[Pag
         with Image.open(BytesIO(data)) as image:
             if image.format not in {"JPEG", "PNG"}:
                 raise DocumentError("Upload a PDF, JPG, or PNG file.")
+            if image.width * image.height > 20_000_000:
+                raise DocumentError("Image dimensions exceed the 20 megapixel limit. Resize and try again.")
             image.verify()
         with Image.open(BytesIO(data)) as image:
             encoded, mime = _encode_page(image)

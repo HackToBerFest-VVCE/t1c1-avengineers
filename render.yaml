@@ -15,7 +15,7 @@ services:
       - key: FRONTEND_ORIGIN
         sync: false
       - key: PYTHON_VERSION
-        value: 3.11.11
+        value: 3.12.8
   - type: web
     name: formbridge-web
     runtime: static
@@ -25,6 +25,8 @@ services:
     envVars:
       - key: VITE_API_BASE_URL
         sync: false
+      - key: NODE_VERSION
+        value: '22'
     routes:
       - type: rewrite
         source: /*

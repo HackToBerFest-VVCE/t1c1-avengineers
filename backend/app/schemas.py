@@ -1,4 +1,5 @@
 from enum import Enum
+from typing import Literal
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -20,13 +21,26 @@ class StudentProfile(BaseModel):
     category: str = Field(default="Not specified", max_length=120)
     annual_income: float | None = Field(default=None, ge=0, le=1_000_000_000)
     percentage: float | None = Field(default=None, ge=0, le=100)
+    age: int | None = Field(default=None, ge=0, le=120)
+    study_mode: str = Field(default="Not specified", max_length=120)
+    model_config = {"allow_inf_nan": False}
 
 
-class Deadline(BaseModel):
+class Verification(BaseModel):
+    status: Literal["verified", "partial_match", "unverified", "not_available"] = "not_available"
+    reason: str = "No reliable document text is available."
+    matched_text: str | None = None
+
+
+class SourceFact(BaseModel):
+    evidence: str | None = Field(default=None, max_length=2000)
+    page: int | None = Field(default=None, ge=1, strict=True)
+    verification: Verification | None = None
+
+
+class Deadline(SourceFact):
     date_text: str | None = None
     iso_date: str | None = None
-    evidence: str | None = None
-    page: int | None = Field(default=None, ge=1)
 
     @field_validator("iso_date")
     @classmethod
@@ -47,28 +61,35 @@ class EligibilityRule(BaseModel):
     operator: str
     value_number: float | None = None
     values: list[str] = Field(default_factory=list)
+    model_config = {"allow_inf_nan": False}
 
 
-class Criterion(BaseModel):
+class Criterion(SourceFact):
     requirement: str
-    evidence: str | None = None
-    page: int | None = Field(default=None, ge=1)
     rule: EligibilityRule | None = None
     status: CriterionStatus = CriterionStatus.needs_review
     explanation_en: str = "Requires manual verification."
     explanation_kn: str = "ದಯವಿಟ್ಟು ಅರ್ಹತೆಯನ್ನು ಪರಿಶೀಲಿಸಿ."
+    requirement_kn: str | None = None
+    student_value: str | float | None = None
 
 
-class RequiredDocument(BaseModel):
+class RequiredDocument(SourceFact):
     name: str
-    evidence: str | None = None
-    page: int | None = Field(default=None, ge=1)
+    name_kn: str | None = None
 
 
-class ActionStep(BaseModel):
+class ActionStep(SourceFact):
     title: str
     detail_en: str
     detail_kn: str
+    title_kn: str | None = None
+    priority: Literal["critical", "important", "optional"] = "important"
+
+
+class RoadmapTask(ActionStep):
+    id: str
+    completed: bool = False
 
 
 class ExtractedAnalysis(BaseModel):
@@ -76,6 +97,7 @@ class ExtractedAnalysis(BaseModel):
     provider: str | None = None
     summary_en: str = "The notice needs manual review."
     summary_kn: str = "ಈ ಪ್ರಕಟಣೆಯನ್ನು ಪರಿಶೀಲಿಸಬೇಕಾಗಿದೆ."
+    summary_sources: list[SourceFact] = Field(default_factory=list)
     deadline: Deadline = Field(default_factory=Deadline)
     criteria: list[Criterion] = Field(default_factory=list)
     eligibility_overall: str = "needs_verification"
@@ -83,10 +105,15 @@ class ExtractedAnalysis(BaseModel):
     steps: list[ActionStep] = Field(default_factory=list)
     unknowns: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+    unknowns_kn: list[str] = Field(default_factory=list)
+    warnings_kn: list[str] = Field(default_factory=list)
     confidence: Confidence = Confidence.low
 
 
 class AnalysisResponse(ExtractedAnalysis):
+    session_id: str
+    session_expires_in: int
+    roadmap: list[RoadmapTask] = Field(default_factory=list)
     model_used: str
     pages_analyzed: int
     processing_seconds: float
@@ -102,3 +129,28 @@ class HealthResponse(BaseModel):
     status: str
     gemma_configured: bool
     model: str
+
+
+class ChatRequest(BaseModel):
+    session_id: str = Field(min_length=32, max_length=128)
+    question: str = Field(min_length=1, max_length=2000)
+    language: str = Field(default="en", pattern="^(en|kn)$")
+
+    @field_validator("question")
+    @classmethod
+    def nonblank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Question must not be blank")
+        return value.strip()
+
+
+class ChatAnswer(BaseModel):
+    answer: str = Field(min_length=1, max_length=10000)
+    suggestions: list[str] = Field(default_factory=list, max_length=12)
+    missing_information: list[str] = Field(default_factory=list, max_length=12)
+    citations: list[SourceFact] = Field(default_factory=list, max_length=12)
+    disclaimer: str = "Preliminary AI guidance only. Confirm with the scholarship provider."
+
+
+class SessionRequest(BaseModel):
+    session_id: str = Field(min_length=32, max_length=128)
