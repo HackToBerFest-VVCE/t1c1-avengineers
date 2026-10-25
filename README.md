@@ -1,10 +1,16 @@
-# FormBridge AI 3.0
+# FormBridge AI 4.0 - Premium AI Experience
 
 FormBridge AI explains scholarship notices with Google's multimodal Gemma 4.
 It reads PDF/JPG/PNG notices and produces English and Kannada guidance.
 Students can inspect original pages, check citation verification, and compare extracted rules with their own facts.
 A document-grounded assistant and application roadmap help students prepare their next steps.
 Built by Avengineers for VVCE Hacktoberfest 2026, Track 1 - Challenge A: Best Use of Gemma 4.
+
+## V4 Interface Upgrade
+
+V4 refines the existing workspace with a compact application shell, functional assistant/roadmap navigation, a shared design-token system, clearer result metadata, a document evidence toolbar, source badges, an assistant composer and a numbered application timeline. Desktop, laptop, tablet and mobile layouts preserve every v3 workflow. Keyboard tabs, modal focus handling, visible focus, reduced motion and Kannada font fallbacks are included.
+
+The backend, model, API client/contracts, verification, eligibility, session handling and retry behavior are unchanged from the supplied v3 ZIP. No runtime dependencies were added. See [UI/UX design documentation](docs/ui-ux-v4.md) for the design system and verification limits.
 
 ## Features
 
@@ -99,7 +105,7 @@ npx playwright install chromium
 npm run test:e2e
 ```
 
-Browser tests own ports 18030 and 15173; these must be free. `tests.e2e_server:app` is **test-only** and uses `httpx.MockTransport`, never Google's real API. Production must start **`app.main:app`**. Browser tests exercise actual PDF.js rendering, desktop/mobile layouts, uploads, citations, chat, Kannada UI, checklist download, errors and multipage navigation. See [testing details and live-language matrix](docs/testing.md). Mocked tests do not establish model accuracy.
+Browser tests own ports 18030 and 15173; these must be free. `tests.e2e_server:app` is **test-only** and uses `httpx.MockTransport`, never Google's real API. Production must start **`app.main:app`**. Browser tests exercise actual PDF.js rendering at desktop/laptop/tablet/mobile widths, uploads, citations, chat, Kannada UI, checklist download, errors, multipage navigation, keyboard focus, responsive navigation and print layout. See [testing details and live-language matrix](docs/testing.md). Mocked tests do not establish model accuracy.
 
 ## Render Deployment
 

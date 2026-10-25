@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
-import { ChevronLeft, ChevronRight, Maximize2, Minimize2, X, ZoomIn, ZoomOut, MoveHorizontal } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Maximize2, Minimize2, X, ZoomIn, ZoomOut, MoveHorizontal, FileText, ArrowUpRight, LoaderCircle } from 'lucide-react';
 import type { Language, SourceFact } from '../lib/types';
 import { t } from '../lib/i18n';
 import SourceVerificationBadge from './SourceVerificationBadge';
+import { useModalFocus } from '../lib/useModalFocus';
 import 'react-pdf/dist/Page/TextLayer.css';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 
@@ -21,27 +22,24 @@ export default function DocumentViewer({ url, isPdf, fact, language, close }: {
   const [failed, setFailed] = useState(false);
   const area = useRef<HTMLDivElement>(null);
   const root = useRef<HTMLElement>(null);
+  const collapse = useCallback(() => setExpanded(false), []);
+  useModalFocus(root, expanded, collapse);
   useEffect(() => { setPage(1); setCount(1); setZoom(1); setFailed(false); }, [url]);
-  useEffect(() => { if (fact?.page) setPage(Math.max(1, fact.page)); }, [fact]);
+  useEffect(() => {
+    if (fact?.page) setPage(Math.max(1, fact.page));
+    if (fact) root.current?.scrollIntoView?.({ behavior: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block: 'nearest' });
+  }, [fact]);
   useEffect(() => {
     if (!area.current) return;
-    const observer = new ResizeObserver(entries => setWidth(Math.max(200, entries[0].contentRect.width - 24)));
+    const observer = new ResizeObserver(entries => setWidth(Math.max(200, entries[0].contentRect.width)));
     observer.observe(area.current);
     return () => observer.disconnect();
   }, [expanded]);
-  useEffect(() => {
-    if (!expanded) return;
-    const previous = document.activeElement as HTMLElement | null;
-    root.current?.focus();
-    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') setExpanded(false); };
-    document.addEventListener('keydown', escape);
-    return () => { document.removeEventListener('keydown', escape); previous?.focus(); };
-  }, [expanded]);
   const button = (label: string, click: () => void, icon: ReactNode, disabled = false) =>
     <button type="button" title={t(language, label)} aria-label={t(language, label)} onClick={click} disabled={disabled}>{icon}</button>;
-  return <aside ref={root} tabIndex={-1} className={`evidence-viewer${expanded ? ' expanded' : ''}`} aria-label={t(language, 'Original document')}>
-    <div className="viewer-heading"><strong>{t(language, 'Original document')}</strong>
-      {button('Expand viewer', () => setExpanded(!expanded), expanded ? <Minimize2 size={17}/> : <Maximize2 size={17}/>)}
+  return <aside ref={root} tabIndex={-1} role={expanded ? 'dialog' : undefined} aria-modal={expanded || undefined} className={`evidence-viewer${expanded ? ' expanded' : ''}`} aria-label={t(language, 'Original document')}>
+    <div className="viewer-heading"><FileText size={18}/><strong>{t(language, 'Original document')}</strong>
+      {button(expanded ? 'Exit expanded view' : 'Expand viewer', () => setExpanded(!expanded), expanded ? <Minimize2 size={17}/> : <Maximize2 size={17}/>)}
       {button('Close viewer', close, <X size={17}/>)}</div>
     <div className="viewer-toolbar">
       {isPdf && <>{button('Previous page', () => setPage(p => p - 1), <ChevronLeft size={17}/>, page <= 1)}
@@ -52,17 +50,17 @@ export default function DocumentViewer({ url, isPdf, fact, language, close }: {
       <span>{Math.round(zoom * 100)}%</span>
       {button('Zoom in', () => setZoom(z => Math.min(3, z + .25)), <ZoomIn size={17}/>, zoom >= 3)}
       {button('Fit to width', () => setZoom(1), <MoveHorizontal size={17}/>)}</div>
-    {fact && <div className="evidence-quote"><strong>{t(language, 'Supporting quotation')}</strong><span> · {fact.page ? `${t(language, 'Page')} ${fact.page}` : t(language, 'Page unconfirmed')}</span><blockquote>{fact.evidence || t(language, 'No quoted evidence - verify manually')}</blockquote><SourceVerificationBadge verification={fact.verification} language={language}/>
+    {fact && <div key={`${fact.page}:${fact.evidence}`} className="evidence-quote" role="status"><strong>{t(language, 'Supporting quotation')}</strong><span> · {fact.page ? `${t(language, 'Page')} ${fact.page}` : t(language, 'Page unconfirmed')}</span><blockquote>{fact.evidence || t(language, 'No quoted evidence - verify manually')}</blockquote><SourceVerificationBadge verification={fact.verification} language={language}/>
       {fact.verification && <p>{language === 'en' ? fact.verification.reason : fact.verification.status === 'verified' ? 'ಉಲ್ಲೇಖವು ಸೂಚಿಸಿದ ಪುಟದ ಪಠ್ಯದೊಂದಿಗೆ ಹೊಂದಿದೆ.' : 'ಉಲ್ಲೇಖವನ್ನು ಸಂಪೂರ್ಣವಾಗಿ ದೃಢಪಡಿಸಲಾಗಿಲ್ಲ. ಮೂಲ ಪುಟವನ್ನು ಸ್ವತಃ ಪರಿಶೀಲಿಸಿ.'}</p>}
     </div>}
     <div className="document-canvas" ref={area}>
       {isPdf ? <Document file={url} onLoadSuccess={({ numPages }) => { setCount(numPages); setPage(p => Math.min(p, numPages)); }}
-        onLoadError={() => setFailed(true)} loading={<p role="status">{language === 'kn' ? 'ದಾಖಲೆ ತೆರೆಯುತ್ತಿದೆ…' : 'Loading document…'}</p>}
+        onLoadError={() => setFailed(true)} loading={<div className="viewer-loading" role="status"><LoaderCircle className="spinning" size={24}/><p>{language === 'kn' ? 'ದಾಖಲೆ ತೆರೆಯುತ್ತಿದೆ…' : 'Loading document…'}</p><div className="skeleton-sheet"/></div>}
         error={<p>{t(language, 'Document could not be displayed. Open the original file.')}</p>}>
         <Page pageNumber={Math.min(page, count)} width={width * zoom} renderAnnotationLayer={false} renderTextLayer/>
       </Document> : <img src={url} alt={t(language, 'Original document')} style={{ width: width * zoom }} onError={() => setFailed(true)}/>}
     </div>
-    <a className="viewer-original" href={url} target="_blank" rel="noopener noreferrer">{t(language, 'Open original')}</a>
+    <a className="viewer-original" href={url} target="_blank" rel="noopener noreferrer">{t(language, 'Open original')}<ArrowUpRight size={15}/></a>
     {failed && <p role="alert">{t(language, 'Document could not be displayed. Open the original file.')}</p>}
   </aside>;
 }

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Download, Printer } from 'lucide-react';
+import { Check, Download, ListChecks, Printer } from 'lucide-react';
 import type { Language, RoadmapTask } from '../lib/types';
 import { t } from '../lib/i18n';
 import SourceTag from './SourceTag';
@@ -20,11 +20,13 @@ export default function ApplicationRoadmap({ tasks, language, sessionId }: { tas
     const anchor = document.createElement('a'); anchor.href = url; anchor.download = 'FormBridge-Application-Roadmap.txt'; anchor.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 500);
   };
-  return <section className="application-roadmap"><div className="documents-header"><h4>{t(language, 'Your next steps')}</h4><div className="roadmap-actions"><button className="export-btn" onClick={download}><Download size={16}/>{t(language, 'Download checklist')}</button><button className="export-btn" onClick={() => window.print()}><Printer size={16}/>{t(language, 'Print checklist')}</button></div></div>
+  return <section className="application-roadmap"><div className="documents-header"><div className="result-card-heading"><ListChecks size={19}/><h4>{t(language, 'Your next steps')}</h4></div><div className="roadmap-actions"><button className="export-btn" onClick={download}><Download size={16}/>{t(language, 'Download checklist')}</button><button className="export-btn" onClick={() => window.print()}><Printer size={16}/>{t(language, 'Print checklist')}</button></div></div>
     <p>{t(language, 'Checklist completion does not submit an application.')}</p>
-    {tasks.map(task => <div className={`roadmap-task${done.includes(task.id) ? ' completed' : ''}`} key={task.id}>
+    <div className="roadmap-completion"><span>{tasks.filter(task => done.includes(task.id)).length} / {tasks.length} {t(language, 'complete')}</span><progress aria-label={t(language, 'Roadmap progress')} max={Math.max(1, tasks.length)} value={tasks.filter(task => done.includes(task.id)).length}/></div>
+    <div className="roadmap-timeline">{tasks.map((task, index) => <div className={`roadmap-task${done.includes(task.id) ? ' completed' : ''}`} key={task.id}>
+      <span className="timeline-marker" aria-hidden="true">{done.includes(task.id) ? <Check size={15}/> : String(index + 1).padStart(2, '0')}</span><div className="timeline-content">
       <label><input type="checkbox" checked={done.includes(task.id)} onChange={() => setDone(items => items.includes(task.id) ? items.filter(id => id !== task.id) : [...items, task.id])}/><strong>{language === 'kn' ? task.title_kn || task.title : task.title}</strong></label>
       <span className={`priority ${task.priority}`}>{t(language, task.priority)}</span><p>{language === 'kn' ? task.detail_kn : task.detail_en}</p>
-      {(task.evidence || task.page) && <SourceTag {...task}/>}</div>)}
+      {(task.evidence || task.page) && <SourceTag {...task}/>}</div></div>)}</div>
   </section>;
 }

@@ -1,5 +1,9 @@
 # Testing and Honest Verification
 
+## V4 UI Regression Coverage
+
+The premium UI upgrade retains the original backend and its tests. Frontend checks now also cover all seven profile properties, replacement preview, arrow-key result tabs, assistant/roadmap navigation, drawer focus/closure, expanded-view focus/closure, image analysis, reduced motion, exported completion status and print visibility. Browser projects cover desktop (1440x1100), laptop (1100x900), tablet (820x1180) and mobile (375x844). See `docs/ui-ux-v4.md`; final executed results are in the V4 delivery report. The baseline and post-change results are distinguished there.
+
 ## Automated Commands
 
 ```bash

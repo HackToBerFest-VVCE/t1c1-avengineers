@@ -6,7 +6,9 @@ export default defineConfig({
   use: { baseURL: 'http://127.0.0.1:15173', screenshot: 'only-on-failure', trace: 'retain-on-failure' },
   projects: [
     { name: 'desktop', use: { viewport: { width: 1440, height: 1100 } } },
-    { name: 'mobile', use: { viewport: { width: 390, height: 844 } } },
+    { name: 'laptop', use: { viewport: { width: 1100, height: 900 } } },
+    { name: 'tablet', use: { viewport: { width: 820, height: 1180 } } },
+    { name: 'mobile', use: { viewport: { width: 375, height: 844 } } },
   ],
   webServer: [
     { command: '.venv/bin/python -m uvicorn tests.e2e_server:app --host 127.0.0.1 --port 18030', cwd: '../backend', url: 'http://127.0.0.1:18030/api/health', reuseExistingServer: false },

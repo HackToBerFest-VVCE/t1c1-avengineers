@@ -34,6 +34,7 @@ it('keeps uploaded file and profile after a failed analysis and lets the user re
   fireEvent.change(screen.getByLabelText('Previous marks (%)'), { target: { value: '85' } });
   fireEvent.click(screen.getByRole('button', { name: /Analyze with Gemma 4/ }));
   expect(screen.getByRole('button', { name: /Analyzing/ })).toBeDisabled();
+  expect(screen.getByLabelText('Previous marks (%)')).toBeDisabled();
   resolve({ ok: false, status: 502, json: async () => ({ detail: 'Temporary Gemma failure' }) });
   expect(await screen.findByRole('alert')).toHaveTextContent('Temporary Gemma failure');
   expect(screen.getByText('notice.pdf')).toBeInTheDocument();
@@ -58,7 +59,7 @@ describe('FormBridge interface', () => {
       json: async () => ({ status: 'ok', gemma_configured: false, model: 'gemma-4-26b-a4b-it' }),
     })));
     render(<App />);
-    expect(screen.getByRole('heading', { name: /Every opportunity/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /Scholarship applications/i })).toBeInTheDocument();
     expect(screen.getByText('Analyze a scholarship notice')).toBeInTheDocument();
     expect(screen.getByText('Your clarity starts here')).toBeInTheDocument();
     expect(await screen.findByText(/Gemma is not configured yet/i)).toBeInTheDocument();

@@ -1,12 +1,13 @@
-import { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import type { ChangeEvent, DragEvent, ReactNode } from 'react';
 import {
-  ArrowRight, ArrowUpRight, BookOpen, CalendarDays, Check,
-  CheckCircle2, ChevronRight, CircleHelp, ClipboardCheck, Clock3,
+  ArrowRight, ArrowUpRight, BookOpen,
+  CheckCircle2, CircleHelp, ClipboardCheck, Clock3,
   CloudUpload, Download, ExternalLink, FileImage,
   FileSearch2, FileText, FolderOpen, GraduationCap, Info, Languages,
   Layers3, LoaderCircle, LockKeyhole, Menu, RotateCcw, ScanLine,
   ShieldCheck, Sparkles, UploadCloud, WandSparkles, X, AlertTriangle,
+  MessageSquare, ListChecks, PanelLeftClose, PanelLeftOpen, Replace, Cpu,
 } from 'lucide-react';
 import { analyzeDocument, deleteSession, healthCheck, loadSampleFile } from './lib/api';
 import type { Analysis, Health, Profile, SourceFact } from './lib/types';
@@ -15,10 +16,14 @@ import EligibilitySummary from './components/EligibilitySummary';
 import ScholarshipChat from './components/ScholarshipChat';
 import ApplicationRoadmap from './components/ApplicationRoadmap';
 import { friendlyError, t } from './lib/i18n';
+import { useModalFocus } from './lib/useModalFocus';
+import ResultHeader from './components/ResultHeader';
+import AnalysisOverview from './components/AnalysisOverview';
 const DocumentViewer = lazy(() => import('./components/DocumentViewer'));
 
 type Tab = 'overview' | 'eligibility' | 'documents' | 'roadmap' | 'assistant';
 type Language = 'en' | 'kn';
+const resultTabs = [['overview', 'Overview', BookOpen], ['eligibility', 'Eligibility', GraduationCap], ['documents', 'Documents', ClipboardCheck], ['roadmap', 'Action plan', ListChecks], ['assistant', 'Assistant', MessageSquare]] as const;
 
 const startProfile: Profile = {
   education_level: 'Not specified', state: 'Not specified', category: 'Not specified',
@@ -29,9 +34,7 @@ const maximumSize = 8 * 1024 * 1024;
 function BrandIcon({ small = false }: { small?: boolean }) {
   return (
     <div className={`brand-icon${small ? ' small' : ''}`} aria-hidden="true">
-      <span className="brand-page brand-page-one" />
-      <span className="brand-page brand-page-two" />
-      <span className="brand-bolt">✦</span>
+      <FileSearch2 size={small ? 17 : 23} strokeWidth={1.7}/>
     </div>
   );
 }
@@ -46,12 +49,12 @@ function StatusIcon({ status }: { status: string }) {
   return <CircleHelp size={18} />;
 }
 
-function StatusCard({ health }: { health: Health | null }) {
+function StatusCard({ health, failed, language }: { health: Health | null; failed: boolean; language: Language }) {
   return (
-    <div className="connection-card">
+    <div className="connection-card" role="status">
       <span className={`connection-dot ${health?.gemma_configured ? 'online' : 'offline'}`} />
       <div>
-        <strong>{!health ? 'Checking backend' : health.gemma_configured ? 'Gemma 4 ready' : 'API key required'}</strong>
+        <strong>{t(language, failed ? 'Backend unavailable' : !health ? 'Checking backend' : health.gemma_configured ? 'Gemma 4 configured' : 'API key required')}</strong>
         <span>{health?.model ?? 'gemma-4-26b-a4b-it'}</span>
       </div>
     </div>
@@ -106,10 +109,30 @@ export default function App() {
   const [tab, setTab] = useState<Tab>('overview');
   const [doneDocuments, setDoneDocuments] = useState<string[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCompact, setSidebarCompact] = useState(false);
+  const [mobileLayout, setMobileLayout] = useState(() => window.matchMedia?.('(max-width: 767px)').matches ?? false);
+  const [activeNav, setActiveNav] = useState('Dashboard');
   const [evidence, setEvidence] = useState<SourceFact | null>(null);
   const [viewerOpen, setViewerOpen] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const resultsRef = useRef<HTMLElement>(null);
+  const sidebarRef = useRef<HTMLElement>(null);
+  const closeSidebar = useCallback(() => setSidebarOpen(false), []);
+  useModalFocus(sidebarRef, sidebarOpen, closeSidebar);
+
+  useEffect(() => {
+    const media = window.matchMedia?.('(max-width: 767px)');
+    if (!media) return;
+    const update = () => { setMobileLayout(media.matches); if (!media.matches) setSidebarOpen(false); };
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, []);
+
+  const navigate = (label: string, section: string, nextTab?: Tab) => {
+    setActiveNav(label); setSidebarOpen(false);
+    if (nextTab) setTab(nextTab);
+    window.setTimeout(() => document.getElementById(section)?.scrollIntoView?.({ behavior: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block: 'start' }), 0);
+  };
 
   useEffect(() => {
     healthCheck().then(setHealth).catch(() => setHealthError(true));
@@ -166,8 +189,9 @@ export default function App() {
       setViewerOpen(true);
       setDoneDocuments([]);
       setTab('overview');
+      setActiveNav('Analysis results');
       setHealth(h => h ? { ...h, gemma_configured: true } : h);
-      window.setTimeout(() => resultsRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }), 100);
+      window.setTimeout(() => resultsRef.current?.scrollIntoView?.({ behavior: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block: 'start' }), 100);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to analyze this document.');
     } finally { setLoading(false); }
@@ -185,88 +209,78 @@ export default function App() {
 
   return (
     <EvidenceContext.Provider value={{ language, open: fact => { setEvidence({ ...fact }); setViewerOpen(true); } }}>
-    <div className="app-shell">
+    <div className={`app-shell${sidebarCompact ? ' compact-shell' : ''}`} lang={language}>
+      <a className="skip-link" href="#workspace">{t(language, 'Skip to workspace')}</a>
       {sidebarOpen && <button className="mobile-scrim" aria-label="Close navigation" onClick={() => setSidebarOpen(false)} />}
-      <aside className={`sidebar${sidebarOpen ? ' visible' : ''}`}>
+      <aside ref={sidebarRef} inert={mobileLayout && !sidebarOpen || undefined} tabIndex={-1} id="workspace-navigation" role={sidebarOpen ? 'dialog' : undefined} aria-modal={sidebarOpen || undefined} aria-label={t(language, 'Workspace navigation')} className={`sidebar${sidebarOpen ? ' visible' : ''}${sidebarCompact ? ' compact' : ''}`}>
         <div className="sidebar-top">
           <a className="brand-row" href="#home" onClick={() => setSidebarOpen(false)}>
             <BrandIcon />
-            <span className="brand-name">formbridge<span className="brand-dot">.</span><small>AI</small></span>
+            <span className="brand-name">FormBridge <small>AI</small></span>
           </a>
-          <div className="sidebar-overline">YOUR WORKSPACE</div>
+          <button className="sidebar-collapse icon-btn" onClick={() => setSidebarCompact(value => !value)} title={t(language, sidebarCompact ? 'Expand navigation' : 'Collapse navigation')} aria-label={t(language, sidebarCompact ? 'Expand navigation' : 'Collapse navigation')}>{sidebarCompact ? <PanelLeftOpen size={17}/> : <PanelLeftClose size={17}/>}</button>
+          <button className="drawer-close icon-btn" aria-label={t(language, 'Close navigation')} onClick={closeSidebar}><X size={20}/></button>
+          <div className="sidebar-overline">{t(language, 'WORKSPACE')}</div>
           <nav className="side-nav" aria-label="Main navigation">
-            <a className="side-link selected" href="#workspace" onClick={() => setSidebarOpen(false)}><Layers3 size={18} /> Dashboard <span className="side-selected-dot" /></a>
-            <a className="side-link" href="#analyzer" onClick={() => setSidebarOpen(false)}><ScanLine size={18} /> Document analyzer</a>
-            <a className="side-link" href="#results" onClick={() => setSidebarOpen(false)}><ClipboardCheck size={18} /> Your results</a>
+            {([['Dashboard', 'workspace', Layers3], ['Document analyzer', 'analyzer', ScanLine], ['Analysis results', 'results', ClipboardCheck], ['Scholarship assistant', 'results', MessageSquare], ['Application roadmap', 'results', ListChecks]] as const).map(([label, section, Icon]) =>
+              <a key={label} className={`side-link${activeNav === label ? ' selected' : ''}`} aria-current={activeNav === label ? 'page' : undefined} aria-label={t(language, label)} title={t(language, label)} href={`#${section}`} onClick={event => { event.preventDefault(); navigate(label, section, label === 'Scholarship assistant' ? 'assistant' : label === 'Application roadmap' ? 'roadmap' : label === 'Analysis results' ? 'overview' : undefined); }}><Icon size={18}/><span className="side-link-label">{t(language, label)}</span>{activeNav === label && <span className="side-selected-dot"/>}</a>)}
           </nav>
-          <div className="sidebar-overline tools-label">EXPLORE</div>
+          <div className="sidebar-overline tools-label">{t(language, 'RESOURCES')}</div>
           <nav className="side-nav" aria-label="Information navigation">
-            <a className="side-link" href="#how-it-works" onClick={() => setSidebarOpen(false)}><BookOpen size={18} /> How it works</a>
-            <a className="side-link" href="https://ai.google.dev/gemma/docs/core/gemma_on_gemini_api" target="_blank" rel="noopener noreferrer"><ExternalLink size={17} /> Gemma documentation</a>
+            <a className={`side-link${activeNav === 'How it works' ? ' selected' : ''}`} title={t(language, 'How it works')} href="#how-it-works" onClick={event => { event.preventDefault(); navigate('How it works', 'how-it-works'); }}><BookOpen size={18}/><span className="side-link-label">{t(language, 'How it works')}</span></a>
+            <a className="side-link" title={t(language, 'About Gemma 4')} href="https://ai.google.dev/gemma/docs/core/gemma_on_gemini_api" target="_blank" rel="noopener noreferrer"><ExternalLink size={17}/><span className="side-link-label">{t(language, 'About Gemma 4')}</span></a>
           </nav>
         </div>
         <div className="sidebar-bottom">
           <div className="hackathon-card">
             <div className="challenge-icon"><Sparkles size={20} /></div>
             <span className="hack-overline">HACKTOBERFEST 2026</span>
-            <strong>Built for better access.</strong>
+            <strong>Avengineers</strong>
             <p>Track 1 · Best Use of Gemma 4</p>
-            <div className="hack-by">Crafted by <b>Avengineers</b></div>
+            <div className="hack-by">VVCE · 2026</div>
           </div>
-          <div className="sidebar-footer"><ShieldCheck size={15} /> Temporary processing <span className="footer-version">v3.0</span></div>
+          <div className="sidebar-footer"><ShieldCheck size={15}/><span>{t(language, 'Temporary processing')}</span><span className="footer-version">v4.0</span></div>
         </div>
       </aside>
 
       <div className="main-column" id="home">
         <header className="topbar">
           <div className="topbar-left">
-            <button className="mobile-menu icon-btn" onClick={() => setSidebarOpen(true)} aria-label="Open navigation"><Menu size={20} /></button>
-            <span className="breadcrumb">Workspace</span><ChevronRight size={15} className="breadcrumb-arrow" /><span className="breadcrumb-current">Dashboard</span>
+            <button className="mobile-menu icon-btn" onClick={() => setSidebarOpen(true)} aria-label="Open navigation" aria-controls="workspace-navigation" aria-expanded={sidebarOpen}><Menu size={20}/></button>
+            <div className="workspace-title"><strong>{t(language, activeNav)}</strong><span>{t(language, 'Your scholarship workspace')}</span></div>
           </div>
           <div className="topbar-right">
             <span className="language-switch" aria-label={t(language, 'Output language')}><button aria-pressed={language === 'en'} className={language === 'en' ? 'current' : ''} onClick={() => setLanguage('en')}>EN</button><button aria-pressed={language === 'kn'} className={language === 'kn' ? 'current' : ''} onClick={() => setLanguage('kn')}>ಕನ್ನಡ</button></span>
-            <span className="model-chip"><span className="cyan-point" /> Powered by <b>Gemma 4</b></span>
+            <StatusCard health={health} failed={healthError} language={language}/>
             <span className="top-avatar" title="Avengineers">A</span>
           </div>
         </header>
 
-        <main className="page-content" id="workspace">
+        <main className="page-content" id="workspace" tabIndex={-1}>
           <section className="hero" aria-label="Introduction">
             <div className="hero-content">
-              <span className="eyebrow"><Sparkles size={14} /> AI-POWERED SCHOLARSHIP INTELLIGENCE</span>
-              <h1>Every opportunity,<br /><em>understood.</em></h1>
-              <p>From complex scholarship notices to clear next steps. Upload a document and let Gemma 4 make sense of the details — in your language.</p>
-              <a href="#analyzer" className="hero-cta">Start analyzing <ArrowUpRight size={17} /></a>
+              <span className="eyebrow"><Sparkles size={14}/> {t(language, 'FORMBRIDGE AI / SCHOLARSHIP INTELLIGENCE')}</span>
+              <h1>{language === 'kn' ? 'ವಿದ್ಯಾರ್ಥಿವೇತನ ಅರ್ಜಿಗಳಿಗೆ' : 'Scholarship applications,'}<br/><em>{language === 'kn' ? 'AI ಮೂಲಕ ಸ್ಪಷ್ಟತೆ.' : 'made clearer with AI.'}</em></h1>
+              <p>{t(language, 'Understand eligibility, verify requirements, and plan your application with Gemma 4 document intelligence.')}</p>
             </div>
-            <div className="hero-art" aria-hidden="true">
-              <span className="hero-orbit orbit-a" /><span className="hero-orbit orbit-b" />
-              <div className="floating-paper paper-back"><div /><div /><div /></div>
-              <div className="floating-paper paper-front">
-                <div className="paper-icon"><FileSearch2 size={26} /></div>
-                <div className="paper-line long" /><div className="paper-line medium" />
-                <div className="paper-line short" />
-                <div className="paper-check"><Check size={17} /></div>
-              </div>
-              <span className="art-glow" />
-              <span className="art-star star-a">✦</span><span className="art-star star-b">✧</span>
-            </div>
+            <div className="hero-actions"><a href="#analyzer" className="hero-cta" onClick={() => setActiveNav('Document analyzer')}>{t(language, 'Analyze a document')}<ArrowUpRight size={17}/></a><a href="#how-it-works" className="hero-secondary">{t(language, 'How it works')}<ArrowRight size={15}/></a><span><Cpu size={14}/>{t(language, 'Powered by Google Gemma 4')}</span></div>
           </section>
 
           <div className="stats-strip" aria-label="Core abilities">
-            <div><div className="stat-icon turquoise"><FileSearch2 size={19} /></div><span><strong>Document intelligence</strong><small>Image + PDF understanding</small></span></div>
-            <div><div className="stat-icon blue"><Languages size={19} /></div><span><strong>Multilingual by design</strong><small>English & Kannada</small></span></div>
-            <div><div className="stat-icon gold"><ShieldCheck size={19} /></div><span><strong>Evidence-aware results</strong><small>Source excerpts & warnings</small></span></div>
+            <div><div className="stat-icon turquoise"><FileSearch2 size={20}/></div><span><strong>{t(language, 'Multimodal intelligence')}</strong><small>{t(language, 'PDFs, images, one clear view.')}</small></span></div>
+            <div><div className="stat-icon gold"><ShieldCheck size={20}/></div><span><strong>{t(language, 'Evidence-based eligibility')}</strong><small>{t(language, 'Requirements linked to their source.')}</small></span></div>
+            <div><div className="stat-icon blue"><Languages size={20}/></div><span><strong>{t(language, 'Multilingual guidance')}</strong><small>{t(language, 'English and Kannada, side by side.')}</small></span></div>
           </div>
 
-          <section id="analyzer" className="analyzer-section">
+          <section id="analyzer" className="analyzer-section" aria-busy={loading}>
             <div className="section-heading">
               <div><span className="section-kicker">01 / DOCUMENT WORKSPACE</span><h2>{t(language, 'Analyze a scholarship notice')}</h2><p>{language === 'kn' ? 'ಪ್ರಕಟಣೆ ಅಪ್‌ಲೋಡ್ ಮಾಡಿ; ವೈಯಕ್ತಿಕ ಮಾರ್ಗದರ್ಶನಕ್ಕಾಗಿ ಐಚ್ಛಿಕ ಮಾಹಿತಿ ನೀಡಿ.' : 'Upload a notice and add optional information to personalize the guidance.'}</p></div>
               <Pill tone="quiet"><LockKeyhole size={13} /> {t(language, 'No upload history')}</Pill>
             </div>
             <div className="form-grid">
               <div className="card upload-card">
-                <div className="card-heading"><div className="card-number">01</div><div><h3>{t(language, 'Your document')}</h3><p>{t(language, 'Upload the original scholarship notice.')}</p></div></div>
-                <input ref={fileInput} className="sr-only" type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" onChange={(e: ChangeEvent<HTMLInputElement>) => chooseFile(e.target.files?.[0])} aria-label="Choose a scholarship notice" />
+                <div className="card-heading"><div className="card-number"><FileText size={18}/></div><div><h3>{t(language, 'Your document')}</h3><p>{t(language, 'Upload the original scholarship notice.')}</p></div></div>
+                <input ref={fileInput} className="sr-only" type="file" disabled={loading} accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" onChange={(e: ChangeEvent<HTMLInputElement>) => chooseFile(e.target.files?.[0])} aria-label="Choose a scholarship notice" />
                 {!file ? (
                   <div className={`dropzone${isDragging ? ' dragging' : ''}`} role="button" tabIndex={0}
                     onClick={() => fileInput.current?.click()}
@@ -280,24 +294,24 @@ export default function App() {
                   </div>
                 ) : (
                   <div className="file-selected">
-                    <div className="file-selected-icon">{file.type.includes('pdf') ? <FileText size={26} /> : <FileImage size={26} />}</div>
+                    <div className="file-selected-icon">{file.type.startsWith('image/') && previewUrl ? <img src={previewUrl} alt={t(language, 'Selected scholarship notice')}/> : <FileText size={28}/>}</div>
                     <div className="file-selected-info"><strong title={file.name}>{file.name}</strong><span>{prettySize(file.size)} · Ready for analysis</span>
                       {previewUrl && <a href={previewUrl} target="_blank" rel="noopener noreferrer">Open original <ArrowUpRight size={13}/></a>}
                     </div>
-                    <button className="file-remove" title="Remove file" aria-label="Remove file" onClick={reset}><X size={17}/></button>
+                    <div className="file-actions"><button className="icon-btn" title={t(language, 'Replace document')} aria-label={t(language, 'Replace document')} disabled={loading} onClick={() => fileInput.current?.click()}><Replace size={17}/></button><button className="file-remove" title="Remove file" aria-label="Remove file" disabled={loading} onClick={reset}><X size={17}/></button></div>
                   </div>
                 )}
                 <div className="sample-area"><span className="sample-title">OR TRY A SAMPLE</span>
                   <div className="sample-row">
-                    <button className="sample-choice" onClick={() => void loadExample('pdf')}><FileText size={17}/><span>{t(language, 'Scholarship PDF')}</span><ArrowUpRight size={13}/></button>
-                    <button className="sample-choice" onClick={() => void loadExample('image')}><FileImage size={17}/><span>{t(language, 'Notice image')}</span><ArrowUpRight size={13}/></button>
+                    <button className="sample-choice" disabled={loading} onClick={() => void loadExample('pdf')}><FileText size={17}/><span>{t(language, 'Scholarship PDF')}</span><ArrowUpRight size={13}/></button>
+                    <button className="sample-choice" disabled={loading} onClick={() => void loadExample('image')}><FileImage size={17}/><span>{t(language, 'Notice image')}</span><ArrowUpRight size={13}/></button>
                   </div>
                   <small>Samples are fictional. Analysis still uses the live Gemma API.</small>
                 </div>
               </div>
               <div className="card details-card">
-                <div className="card-heading"><div className="card-number">02</div><div><h3>{t(language, 'Student profile')} <span className="optional-tag">{language === 'kn' ? 'ಐಚ್ಛಿಕ' : 'OPTIONAL'}</span></h3><p>{t(language, 'Helps compare eligibility requirements.')}</p></div></div>
-                <div className="form-fields">
+                <div className="card-heading"><div className="card-number"><GraduationCap size={18}/></div><div><h3>{t(language, 'Student profile')} <span className="optional-tag">{language === 'kn' ? 'ಐಚ್ಛಿಕ' : 'OPTIONAL'}</span></h3><p>{t(language, 'Helps compare eligibility requirements.')}</p></div></div>
+                <fieldset className="form-fields" disabled={loading} aria-label={t(language, 'Student profile')}>
                   <div className="field-row">
                     <Field label={t(language, 'Education level')} id="education"><select id="education" value={profile.education_level} onChange={e => setField('education_level', e.target.value)}><option>Not specified</option><option>PUC / Class 12</option><option>Undergraduate</option><option>Postgraduate</option><option>Diploma</option><option>Other</option></select></Field>
                     <Field label={t(language, 'State of residence')} id="state"><select id="state" value={profile.state} onChange={e => setField('state', e.target.value)}><option>Not specified</option><option>Karnataka</option><option>Maharashtra</option><option>Tamil Nadu</option><option>Kerala</option><option>Andhra Pradesh</option><option>Telangana</option><option>Other</option></select></Field>
@@ -308,12 +322,12 @@ export default function App() {
                   </div>
                   <Field label={t(language, 'Category')} id="category"><select id="category" value={profile.category} onChange={e => setField('category', e.target.value)}><option>Not specified</option><option>General</option><option>OBC</option><option>SC</option><option>ST</option><option>EWS</option><option>Prefer not to say</option></select></Field>
                   <div className="field-row"><Field label={t(language, 'Age')} id="age"><input id="age" type="number" min="0" max="120" step="1" value={profile.age} onChange={e => setField('age', e.target.value)}/></Field><Field label={t(language, 'Study mode')} id="study-mode"><select id="study-mode" value={profile.study_mode} onChange={e => setField('study_mode', e.target.value)}><option>Not specified</option><option>Full-time</option><option>Part-time</option><option>Distance</option></select></Field></div>
-                </div>
+                </fieldset>
                 <div className="profile-footnote"><Info size={15}/><span>{language === 'kn' ? 'ನೀವು ನೀಡಿದ ದಾಖಲೆ ಮತ್ತು ಮಾಹಿತಿ Google API ಗೆ ಹೋಗುತ್ತದೆ. ಸಹಾಯಕಕ್ಕಾಗಿ ಸರ್ವರ್ ಮೆಮೊರಿಯಲ್ಲಿ 20 ನಿಮಿಷಗಳವರೆಗೆ ಇರುತ್ತದೆ.' : 'The notice and supplied details go to Google’s model API. Document context is kept in server memory for up to 20 minutes for chat; reset removes it early.'}</span></div>
               </div>
             </div>
             <div className="action-card">
-              <div className="action-text"><div className="magic-icon"><WandSparkles size={22}/></div><span><strong>Ready to see the bigger picture?</strong><small>Gemma 4 will read the notice and build actionable guidance.</small></span></div>
+              <div className="action-text"><div className="magic-icon"><WandSparkles size={21}/></div><span><strong>{t(language, 'A clearer next step starts here.')}</strong><small>{t(language, 'Your notice. Your details. Evidence you can inspect.')}</small></span></div>
               <button className="analyze-btn" onClick={() => void submit()} disabled={loading}>
                 {loading ? <><LoaderCircle className="spinning" size={19}/> {t(language, 'Analyzing…')}</> : <><Sparkles size={19}/> {t(language, 'Analyze with Gemma 4')} <ArrowRight size={17}/></>}
               </button>
@@ -331,27 +345,28 @@ export default function App() {
             {!analysis ? (
               <div className="results-empty card"><div className="empty-graphic"><FolderOpen size={39}/><span className="empty-star">✦</span></div><strong>Your clarity starts here</strong><p>Upload a scholarship notice above to see requirements, deadlines, eligibility guidance, and a document checklist.</p><a href="#analyzer">Analyze your first document <ArrowRight size={16}/></a></div>
             ) : (
+              <div className="results-content">
+              <ResultHeader analysis={analysis} language={language}/>
               <div className={`evidence-workspace${viewerOpen ? ' with-viewer' : ''}`}>
               {viewerOpen && previewUrl && <Suspense fallback={<p role="status">Loading viewer…</p>}><DocumentViewer url={previewUrl} isPdf={file?.type === 'application/pdf' || /\.pdf$/i.test(file?.name ?? '')} fact={evidence} language={language} close={() => setViewerOpen(false)}/></Suspense>}
               <div className="result-wrapper analysis-panel">
-                <div className="result-banner"><div><div className="result-eyebrow"><CheckCircle2 size={15}/> ANALYSIS COMPLETE <span>· {analysis.pages_analyzed} page{analysis.pages_analyzed !== 1 ? 's' : ''} scanned</span></div><h3>{analysis.title}</h3><p>{analysis.provider || 'Provider not clearly identified'}</p></div><div className="result-banner-right"><span>MODEL USED</span><strong>{analysis.model_used}</strong><small>{analysis.processing_seconds.toFixed(1)}s processing · {analysis.confidence} model-estimated confidence</small></div></div>
                 <div className="result-tabs" role="tablist" aria-label="Analysis sections">
-                  {([['overview', 'Overview'], ['eligibility', 'Eligibility'], ['documents', 'Documents'], ['roadmap', 'Action plan'], ['assistant', 'Assistant']] as const).map(([key, label]) =>
-                    <button key={key} role="tab" aria-selected={tab === key} className={tab === key ? 'active' : ''} onClick={() => setTab(key)}>{t(language, label)}</button>
+                  {resultTabs.map(([key, label, Icon], index) =>
+                    <button key={key} id={`result-tab-${key}`} role="tab" aria-controls="analysis-tabpanel" tabIndex={tab === key ? 0 : -1} aria-selected={tab === key} className={tab === key ? 'active' : ''} onClick={() => setTab(key)}
+                      onKeyDown={event => {
+                        const next = event.key === 'ArrowRight' ? (index + 1) % resultTabs.length : event.key === 'ArrowLeft' ? (index + resultTabs.length - 1) % resultTabs.length : event.key === 'Home' ? 0 : event.key === 'End' ? resultTabs.length - 1 : null;
+                        if (next !== null) { event.preventDefault(); setTab(resultTabs[next][0]); document.getElementById(`result-tab-${resultTabs[next][0]}`)?.focus(); }
+                      }}><Icon size={15}/>{t(language, label)}</button>
                   )}
                   {!viewerOpen && <button title={t(language, 'View evidence')} aria-label={t(language, 'View evidence')} onClick={() => setViewerOpen(true)}><BookOpen size={16}/></button>}
                 </div>
                 <EligibilitySummary criteria={analysis.criteria} language={language}/>
-                {tab === 'overview' && <div className="overview-grid">
-                  <div className="result-summary"><div className="result-card-heading"><BookOpen size={18}/><h4>{t(language, 'What this means')}</h4></div><p className={language === 'kn' ? 'kannada-text' : ''}>{language === 'kn' ? analysis.summary_kn : analysis.summary_en}</p>
-                    {(analysis.summary_sources ?? []).map((source, i) => <SourceTag key={i} {...source}/>)}
-                    <div className="summary-meta"><span><FileText size={14}/> {analysis.filename}</span></div></div>
-                  <div className="deadline-card"><div className="result-card-heading"><CalendarDays size={18}/><h4>{t(language, 'Application deadline')}</h4></div><strong>{analysis.deadline.date_text ?? t(language, 'Deadline not found in the uploaded document. Verify it through the official scholarship provider.')}</strong><SourceTag {...analysis.deadline}/></div>
-                </div>}
+                <div className="result-panel" id="analysis-tabpanel" role="tabpanel" tabIndex={0} aria-labelledby={`result-tab-${tab}`}>
+                {tab === 'overview' && <AnalysisOverview analysis={analysis} language={language} navigate={setTab}/>}
                 {tab === 'eligibility' && <div className="detail-list"><div className="result-card-heading"><GraduationCap size={18}/><h4>{t(language, 'Eligibility requirements')}</h4></div>
                   <div className="eligibility-overall" role="status"><strong>{analysis.eligibility_overall === 'appears_to_meet_extracted' ? (language === 'kn' ? 'ಪಡೆಯಲಾದ ನಿಯಮಗಳನ್ನು ಪೂರೈಸಿದಂತೆ ಕಾಣುತ್ತದೆ' : 'Appears to meet extracted rules') : analysis.eligibility_overall === 'possible_mismatch' ? (language === 'kn' ? 'ಸಂಭಾವ್ಯ ಹೊಂದಾಣಿಕೆ ಇಲ್ಲ' : 'Possible eligibility mismatch') : t(language, 'Needs verification')}</strong><p>{language === 'kn' ? 'ಇದು ಅಧಿಕೃತ ಅರ್ಹತಾ ನಿರ್ಣಯವಲ್ಲ. ಮೂಲ ಪ್ರಕಟಣೆ ಮತ್ತು ಅಧಿಕೃತ ಸಂಸ್ಥೆಯೊಂದಿಗೆ ಪರಿಶೀಲಿಸಿ.' : 'Preliminary only. Extracted rules may be incomplete; confirm with the official provider.'}</p></div>
                   {analysis.criteria.length ? analysis.criteria.map((item, index) => <div className="criterion" key={index}><div className={`criterion-icon ${item.status}`}><StatusIcon status={item.status}/></div><div><strong>{language === 'kn' ? item.requirement_kn || item.requirement : item.requirement}</strong>
-                    <span className={`assessment ${item.status}`}>{t(language, item.status === 'likely_meets' ? 'Satisfied' : item.status === 'may_not_meet' ? 'Possible mismatches' : 'Needs verification')}</span>
+                    <span className={`assessment ${item.status}`}>{t(language, item.status === 'likely_meets' ? 'Appears satisfied' : item.status === 'may_not_meet' ? 'Possible mismatch' : 'Needs verification')}</span>
                     <p>{t(language, 'Extracted condition')}: {item.rule ? `${({ lt: '<', lte: '≤', gt: '>', gte: '≥', eq: '=', one_of: '∈' } as Record<string, string>)[item.rule.operator] ?? '?'} ${item.rule.value_number ?? item.rule.values.join(', ')}` : item.evidence || t(language, 'Needs verification')}</p>
                     <p>{t(language, 'Student value')}: {item.student_value === null || item.student_value === undefined || item.student_value === 'Not specified' ? t(language, 'Not supplied') : String(item.student_value)}</p>
                     <p className={language === 'kn' ? 'kannada-text' : ''}>{language === 'kn' ? item.explanation_kn : item.explanation_en}</p><SourceTag {...item}/></div></div>) : <p>{t(language, 'No eligibility criteria could be confidently extracted. Check the official notice.')}</p>}
@@ -363,8 +378,10 @@ export default function App() {
                 </div>}
                 {tab === 'roadmap' && <ApplicationRoadmap key={analysis.request_id} sessionId={analysis.request_id} tasks={analysis.roadmap ?? []} language={language}/>}
                 <div hidden={tab !== 'assistant'}><ScholarshipChat key={analysis.session_id} sessionId={analysis.session_id} language={language}/></div>
+                </div>
                 {(analysis.unknowns.length > 0 || analysis.warnings.length > 0) && <div className="review-warning"><AlertTriangle size={19}/><div><strong>{t(language, 'Before you apply, double-check these details')}</strong><ul>{(language === 'kn' ? [...(analysis.unknowns_kn?.length ? analysis.unknowns_kn : analysis.unknowns), ...(analysis.warnings_kn?.length ? analysis.warnings_kn : analysis.warnings)] : [...analysis.unknowns, ...analysis.warnings]).map((warning, index) => <li key={index}>{warning}</li>)}</ul></div></div>}
                 <div className="result-disclaimer"><ShieldCheck size={17}/>{language === 'kn' ? 'AI ಮಾರ್ಗದರ್ಶನ ಮಾತ್ರ. ಮೂಲ ಪ್ರಕಟಣೆ ಮತ್ತು ಅಧಿಕೃತ ಸಂಸ್ಥೆಯೊಂದಿಗೆ ಪರಿಶೀಲಿಸಿ.' : analysis.disclaimer} <span>Request ID: {analysis.request_id}</span></div>
+              </div>
               </div>
               </div>
             )}
@@ -374,7 +391,6 @@ export default function App() {
         </main>
         <footer className="page-footer"><span><BrandIcon small/> FormBridge AI <span>·</span> An Avengineers project</span><span><Clock3 size={13}/> Built for Hacktoberfest 2026 <span>·</span> Powered by Gemma 4</span></footer>
       </div>
-      <div className="floating-status"><StatusCard health={health}/></div>
     </div>
     </EvidenceContext.Provider>
   );

@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { LoaderCircle, RotateCcw, Send } from 'lucide-react';
+import { ArrowUpRight, LoaderCircle, MessageSquare, RotateCcw, Send, Sparkles, UserRound } from 'lucide-react';
 import type { ChatAnswer, Language } from '../lib/types';
 import { askScholarship, resetChat } from '../lib/api';
 import { friendlyError, t } from '../lib/i18n';
@@ -37,15 +37,15 @@ export default function ScholarshipChat({ sessionId, language }: { sessionId: st
     finally { setPending(false); busy.current = false; }
   };
   return <section className="scholarship-chat" aria-label={t(language, 'Scholarship assistant')}>
-    <div className="chat-heading"><h4>{t(language, 'Scholarship assistant')}</h4><button className="icon-btn" title={t(language, 'Reset chat')} aria-label={t(language, 'Reset chat')} disabled={pending} onClick={() => void reset()}><RotateCcw size={17}/></button></div>
+    <div className="chat-heading"><div><span className="assistant-mark"><Sparkles size={19}/></span><div><h4>{t(language, 'Scholarship assistant')}</h4><small>{t(language, 'Powered by Google Gemma 4')}</small></div></div><button className="icon-btn" title={t(language, 'Reset chat')} aria-label={t(language, 'Reset chat')} disabled={pending} onClick={() => void reset()}><RotateCcw size={17}/></button></div>
     <div className="chat-messages" role="log" aria-live="polite">{messages.map((message, index) => <article key={index} className={`chat-message ${message.role}`} lang={message.language}>
-      <strong>{message.role === 'user' ? (message.language === 'kn' ? 'ನೀವು' : 'You') : 'Gemma 4'}</strong><p>{message.text}</p>
+      <div className="message-author">{message.role === 'user' ? <UserRound size={14}/> : <Sparkles size={14}/>}<strong>{message.role === 'user' ? (message.language === 'kn' ? 'ನೀವು' : 'You') : 'Gemma 4'}</strong></div><p>{message.text}</p>
       {message.result && <>{message.result.citations.map((citation, i) => <SourceTag key={i} {...citation}/>)}
         {message.result.suggestions.length > 0 && <><b>{t(message.language, 'General suggestions')}</b><ul>{message.result.suggestions.map((s, i) => <li key={i}>{s}</li>)}</ul></>}
         {message.result.missing_information.length > 0 && <><b>{t(message.language, 'Missing information')}</b><ul>{message.result.missing_information.map((s, i) => <li key={i}>{s}</li>)}</ul></>}
         <small>{message.result.disclaimer}</small></>}
     </article>)}<div ref={end}/></div>
-    {!messages.length && <div className="suggested-questions">{['Why do I need verification?', 'What documents should I prepare?', 'What is the age limit?'].map(q => <button key={q} disabled={pending} onClick={() => void send(t(language, q))}>{t(language, q)}</button>)}</div>}
+    {!messages.length && <div className="chat-empty"><MessageSquare size={29}/><h5>{t(language, 'Clarity, one question at a time.')}</h5><div className="suggested-questions">{['Why do I need verification?', 'What documents should I prepare?', 'Which details are missing?', 'What should I do next?', 'What is the age limit?'].map(q => <button key={q} disabled={pending} onClick={() => void send(t(language, q))}>{t(language, q)}<ArrowUpRight size={14}/></button>)}</div></div>}
     {pending && <p role="status"><LoaderCircle className="spinning" size={16}/> {t(language, 'Preparing an answer')}</p>}
     {error && <div role="alert" className="inline-notice error">{friendlyError(language, error)}{retry && <button disabled={pending} onClick={() => void send(retry.question, retry.language)}>{t(language, 'Retry')}</button>}</div>}
     <form className="chat-composer" onSubmit={e => { e.preventDefault(); void send(question); }}>
@@ -53,5 +53,6 @@ export default function ScholarshipChat({ sessionId, language }: { sessionId: st
       <textarea id="chat-question" value={question} maxLength={2000} rows={2} disabled={pending} onChange={e => setQuestion(e.target.value)} placeholder={t(language, 'Ask about this notice')}/>
       <button type="submit" className="icon-btn" disabled={pending || !question.trim()} title={t(language, 'Send question')} aria-label={t(language, 'Send question')}><Send size={20}/></button>
     </form>
+    <div className="composer-footer"><span>{t(language, 'Preliminary guidance. Confirm with the provider.')}</span><span>{question.length}/2000</span></div>
   </section>;
 }
