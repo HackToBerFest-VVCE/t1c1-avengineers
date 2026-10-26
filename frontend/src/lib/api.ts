@@ -43,6 +43,8 @@ export const askScholarship = (session_id: string, question: string, language: L
   sessionPost<ChatAnswer>('/api/chat', { session_id, question, language });
 export const resetChat = (session_id: string) => sessionPost('/api/chat/reset', { session_id });
 export const deleteSession = (session_id: string) => sessionPost('/api/session/delete', { session_id });
+export const recoverTranslations = (session_id: string) =>
+  sessionPost<Partial<Analysis>>('/api/analysis/translate', { session_id });
 
 export async function loadSampleFile(name: string): Promise<File> {
   const filename = name === 'pdf'

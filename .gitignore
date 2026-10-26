@@ -1,26 +1,21 @@
-# credentials
 .env
 .env.*
 !.env.example
-*.pem
-# Python
+.venv/
+venv/
+node_modules/
+dist/
 __pycache__/
 *.py[cod]
 .pytest_cache/
-.venv/
-venv/
-.coverage
-htmlcov/
-# JS
-node_modules/
-dist/
+.mypy_cache/
 coverage/
+.coverage
 *.tsbuildinfo
-# tooling
-.DS_Store
-.idea/
-.vscode/
-# transient outputs
-.tmp/
 test-results/
 playwright-report/
+.vite/
+.git/
+.DS_Store
+*.pem
+*.key

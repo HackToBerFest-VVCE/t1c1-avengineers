@@ -21,7 +21,7 @@ class PageImage:
 def _encode_page(image: Image.Image) -> tuple[bytes, str]:
     """Keep inline image payloads small enough for hosted inference."""
     image = ImageOps.exif_transpose(image)
-    image.thumbnail((1800, 1800), Image.Resampling.LANCZOS)
+    image.thumbnail((2200, 2200), Image.Resampling.LANCZOS)
     converted = image.convert("RGB")
     buf = BytesIO()
     converted.save(buf, format="PNG", optimize=True)
@@ -31,7 +31,7 @@ def _encode_page(image: Image.Image) -> tuple[bytes, str]:
     # A high-resolution photograph can be many MB even when the source PDF is
     # small. JPEG compression avoids exceeding the provider's inline-data cap.
     buf = BytesIO()
-    converted.save(buf, format="JPEG", quality=78, optimize=True)
+    converted.save(buf, format="JPEG", quality=86, optimize=True)
     return buf.getvalue(), "image/jpeg"
 
 
@@ -53,17 +53,21 @@ def prepare_document(data: bytes, filename: str, max_pages: int = 5) -> list[Pag
                     page = doc[index]
                     try:
                         width, height = page.get_size()
-                        # Approximately 150 DPI, bounded to avoid massive images.
-                        scale = min(2.0, 1900 / max(width, height))
+                        # Higher-resolution page text, still bounded for hosted inline inference.
+                        scale = min(2.8, 2400 / max(width, height))
                         bitmap = page.render(scale=scale)
                         try:
                             img = bitmap.to_pil()
                             encoded, mime = _encode_page(img)
-                            text_page = page.get_textpage()
                             try:
-                                text = text_page.get_text_range()
-                            finally:
-                                text_page.close()
+                                text_page = page.get_textpage()
+                                try:
+                                    text = text_page.get_text_range()
+                                finally:
+                                    text_page.close()
+                            except Exception:
+                                # An unreadable text layer must not discard a usable page image.
+                                text = ""
                             pages.append(PageImage(encoded, mime, index + 1, text))
                         finally:
                             bitmap.close()
@@ -92,3 +96,10 @@ def prepare_document(data: bytes, filename: str, max_pages: int = 5) -> list[Pag
         raise
     except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
         raise DocumentError("Upload a valid PDF, JPG, or PNG file.") from exc
+
+
+def reliable_page_text(text: str) -> bool:
+    import unicodedata
+    letters = sum(c.isalpha() for c in text)
+    corrupted = sum(c == '\ufffd' or unicodedata.category(c) == 'Co' for c in text)
+    return letters >= 10 and corrupted <= max(1, len(text) * .01)

@@ -8,14 +8,16 @@ import {
   Layers3, LoaderCircle, LockKeyhole, Menu, RotateCcw, ScanLine,
   ShieldCheck, Sparkles, UploadCloud, WandSparkles, X, AlertTriangle,
   MessageSquare, ListChecks, PanelLeftClose, PanelLeftOpen, Replace, Cpu,
+  CheckSquare, SearchCheck,
 } from 'lucide-react';
-import { analyzeDocument, deleteSession, healthCheck, loadSampleFile } from './lib/api';
+import { analyzeDocument, deleteSession, healthCheck, loadSampleFile, recoverTranslations } from './lib/api';
 import type { Analysis, Health, Profile, SourceFact } from './lib/types';
 import SourceTag, { EvidenceContext } from './components/SourceTag';
 import EligibilitySummary from './components/EligibilitySummary';
 import ScholarshipChat from './components/ScholarshipChat';
 import ApplicationRoadmap from './components/ApplicationRoadmap';
 import { friendlyError, t } from './lib/i18n';
+import { contentText, needsContentTranslation } from './lib/content';
 import { useModalFocus } from './lib/useModalFocus';
 import ResultHeader from './components/ResultHeader';
 import AnalysisOverview from './components/AnalysisOverview';
@@ -31,10 +33,17 @@ const startProfile: Profile = {
 };
 const maximumSize = 8 * 1024 * 1024;
 
+const loadingStages = [
+  'Preparing document…',
+  'Sending document for analysis…',
+  'Processing response…',
+  'Preparing results…',
+];
+
 function BrandIcon({ small = false }: { small?: boolean }) {
   return (
     <div className={`brand-icon${small ? ' small' : ''}`} aria-hidden="true">
-      <FileSearch2 size={small ? 17 : 23} strokeWidth={1.7}/>
+      <FileSearch2 size={small ? 17 : 24} strokeWidth={1.8}/>
     </div>
   );
 }
@@ -75,16 +84,16 @@ function prettySize(bytes: number) {
   return bytes < 1024 * 1024 ? `${Math.round(bytes / 1024)} KB` : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function exportChecklist(analysis: Analysis) {
+function exportChecklist(analysis: Analysis, language: Language) {
   const lines = [
     `FORMBRIDGE AI — ${analysis.title}`,
     `Source: ${analysis.filename}`,
     'AI guidance only. Verify details with the original notice.', '',
     'DOCUMENT CHECKLIST',
-    ...analysis.documents.map((doc, index) => `[ ] ${index + 1}. ${doc.name}${doc.page ? ` (page ${doc.page})` : ''}`),
+    ...analysis.documents.map((doc, index) => `[ ] ${index + 1}. ${contentText(language, doc.name, doc.name_kn)}${doc.page ? ` (${t(language, 'Page')} ${doc.page})` : ''}`),
     '', 'NEXT STEPS',
-    ...analysis.steps.map((step, index) => `${index + 1}. ${step.title}: ${step.detail_en}`),
-    '', 'QUESTIONS TO VERIFY', ...analysis.unknowns.map(x => `- ${x}`),
+    ...analysis.steps.map((step, index) => `${index + 1}. ${contentText(language, step.title, step.title_kn)}: ${contentText(language, step.detail_en, step.detail_kn)}`),
+    '', 'QUESTIONS TO VERIFY', ...analysis.unknowns.map((x, i) => `- ${contentText(language, x, analysis.unknowns_kn?.[i])}`),
   ];
   const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
   const url = URL.createObjectURL(blob);
@@ -104,8 +113,11 @@ export default function App() {
   const [profile, setProfile] = useState<Profile>(startProfile);
   const [language, setLanguage] = useState<Language>('en');
   const [loading, setLoading] = useState(false);
+  const [loadingStage, setLoadingStage] = useState(0);
   const [error, setError] = useState('');
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
+  const [translating, setTranslating] = useState(false);
+  const [translationError, setTranslationError] = useState('');
   const [tab, setTab] = useState<Tab>('overview');
   const [doneDocuments, setDoneDocuments] = useState<string[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -127,6 +139,14 @@ export default function App() {
     media.addEventListener('change', update);
     return () => media.removeEventListener('change', update);
   }, []);
+
+  useEffect(() => {
+    if (!loading) { setLoadingStage(0); return; }
+    const timer = window.setInterval(() => {
+      setLoadingStage(prev => (prev + 1) % loadingStages.length);
+    }, 1800);
+    return () => window.clearInterval(timer);
+  }, [loading]);
 
   const navigate = (label: string, section: string, nextTab?: Tab) => {
     setActiveNav(label); setSidebarOpen(false);
@@ -154,6 +174,7 @@ export default function App() {
     setFile(selected);
     if (analysis?.session_id) void deleteSession(analysis.session_id).catch(() => {});
     setAnalysis(null);
+    setTranslationError('');
     setDoneDocuments([]);
     setError('');
     setTab('overview');
@@ -182,7 +203,7 @@ export default function App() {
       setError('Age must be a whole number between 0 and 120.'); return;
     }
     if (analysis?.session_id) void deleteSession(analysis.session_id).catch(() => {});
-    setError(''); setLoading(true); setAnalysis(null); setEvidence(null);
+    setError(''); setTranslationError(''); setLoading(true); setAnalysis(null); setEvidence(null);
     try {
       const result = await analyzeDocument(file, profile);
       setAnalysis(result);
@@ -199,13 +220,23 @@ export default function App() {
   const reset = () => {
     if (loading) return;
     if (analysis?.session_id) void deleteSession(analysis.session_id).catch(() => {});
-    setFile(null); setError(''); setAnalysis(null);
+    setFile(null); setError(''); setTranslationError(''); setAnalysis(null);
     setViewerOpen(false); setEvidence(null);
     setDoneDocuments([]); setTab('overview');
     if (fileInput.current) fileInput.current.value = '';
   };
   const toggleDone = (name: string) => setDoneDocuments(existing =>
     existing.includes(name) ? existing.filter(x => x !== name) : [...existing, name]);
+  const retryTranslation = async () => {
+    if (!analysis || translating) return;
+    const sessionId = analysis.session_id;
+    setTranslating(true); setTranslationError('');
+    try {
+      const update = await recoverTranslations(sessionId);
+      setAnalysis(current => current?.session_id === sessionId ? { ...current, ...update } : current);
+    } catch (err) { setTranslationError(err instanceof Error ? err.message : 'Translation unavailable'); }
+    finally { setTranslating(false); }
+  };
 
   return (
     <EvidenceContext.Provider value={{ language, open: fact => { setEvidence({ ...fact }); setViewerOpen(true); } }}>
@@ -237,9 +268,9 @@ export default function App() {
             <span className="hack-overline">HACKTOBERFEST 2026</span>
             <strong>Avengineers</strong>
             <p>Track 1 · Best Use of Gemma 4</p>
-            <div className="hack-by">VVCE · 2026</div>
+            <div className="hack-by">VVCE · Mysore</div>
           </div>
-          <div className="sidebar-footer"><ShieldCheck size={15}/><span>{t(language, 'Temporary processing')}</span><span className="footer-version">v4.0</span></div>
+          <div className="sidebar-footer"><ShieldCheck size={15}/><span>{t(language, 'Temporary processing')}</span><span className="footer-version">v5.0</span></div>
         </div>
       </aside>
 
@@ -250,9 +281,14 @@ export default function App() {
             <div className="workspace-title"><strong>{t(language, activeNav)}</strong><span>{t(language, 'Your scholarship workspace')}</span></div>
           </div>
           <div className="topbar-right">
+            <div className="gemma-model-pill" title="Google Gemma 4 Multimodal Document Understanding">
+              <span className="model-dot" />
+              <span className="model-title">Google Gemma 4</span>
+              <span className="model-id">gemma-4-26b-a4b-it</span>
+            </div>
             <span className="language-switch" aria-label={t(language, 'Output language')}><button aria-pressed={language === 'en'} className={language === 'en' ? 'current' : ''} onClick={() => setLanguage('en')}>EN</button><button aria-pressed={language === 'kn'} className={language === 'kn' ? 'current' : ''} onClick={() => setLanguage('kn')}>ಕನ್ನಡ</button></span>
             <StatusCard health={health} failed={healthError} language={language}/>
-            <span className="top-avatar" title="Avengineers">A</span>
+            <span className="top-avatar" title="Team Avengineers · Track 1">A</span>
           </div>
         </header>
 
@@ -260,26 +296,81 @@ export default function App() {
           <section className="hero" aria-label="Introduction">
             <div className="hero-content">
               <span className="eyebrow"><Sparkles size={14}/> {t(language, 'FORMBRIDGE AI / SCHOLARSHIP INTELLIGENCE')}</span>
-              <h1>{language === 'kn' ? 'ವಿದ್ಯಾರ್ಥಿವೇತನ ಅರ್ಜಿಗಳಿಗೆ' : 'Scholarship applications,'}<br/><em>{language === 'kn' ? 'AI ಮೂಲಕ ಸ್ಪಷ್ಟತೆ.' : 'made clearer with AI.'}</em></h1>
-              <p>{t(language, 'Understand eligibility, verify requirements, and plan your application with Gemma 4 document intelligence.')}</p>
+              <h1>
+                <span className="hero-kicker-title">{t(language, 'Your AI Copilot for Scholarship Success')}</span>
+                <span className="hero-main-title">{language === 'kn' ? 'ವಿದ್ಯಾರ್ಥಿವೇತನ ಅರ್ಜಿಗಳಿಗೆ' : 'Scholarship applications,'}<br/><em>{language === 'kn' ? 'AI ಮೂಲಕ ಸ್ಪಷ್ಟತೆ.' : 'made clearer with AI.'}</em></span>
+              </h1>
+              <p>{t(language, 'Understand scholarship requirements, verify eligibility, and navigate applications confidently with Gemma 4-powered intelligence.')}</p>
             </div>
-            <div className="hero-actions"><a href="#analyzer" className="hero-cta" onClick={() => setActiveNav('Document analyzer')}>{t(language, 'Analyze a document')}<ArrowUpRight size={17}/></a><a href="#how-it-works" className="hero-secondary">{t(language, 'How it works')}<ArrowRight size={15}/></a><span><Cpu size={14}/>{t(language, 'Powered by Google Gemma 4')}</span></div>
+            <div className="hero-actions">
+              <a href="#analyzer" className="hero-cta" onClick={() => setActiveNav('Document analyzer')}>
+                <WandSparkles size={17}/>
+                <span>{t(language, 'Analyze Scholarship Document')}</span>
+                <ArrowUpRight size={17}/>
+              </a>
+              <a href="#how-it-works" className="hero-secondary" onClick={() => setActiveNav('How it works')}>
+                {t(language, 'How it works')}<ArrowRight size={15}/>
+              </a>
+              <span className="hero-chip"><Cpu size={14}/>{t(language, 'Powered by Google Gemma 4')}</span>
+            </div>
           </section>
 
           <div className="stats-strip" aria-label="Core abilities">
-            <div><div className="stat-icon turquoise"><FileSearch2 size={20}/></div><span><strong>{t(language, 'Multimodal intelligence')}</strong><small>{t(language, 'PDFs, images, one clear view.')}</small></span></div>
-            <div><div className="stat-icon gold"><ShieldCheck size={20}/></div><span><strong>{t(language, 'Evidence-based eligibility')}</strong><small>{t(language, 'Requirements linked to their source.')}</small></span></div>
-            <div><div className="stat-icon blue"><Languages size={20}/></div><span><strong>{t(language, 'Multilingual guidance')}</strong><small>{t(language, 'English and Kannada, side by side.')}</small></span></div>
+            <div className="stat-card">
+              <div className="stat-icon turquoise"><FileSearch2 size={20}/></div>
+              <div>
+                <strong>{t(language, 'AI Document Intelligence')}</strong>
+                <small>{t(language, 'Understand complex scholarship notifications instantly with Gemma 4 multimodal reasoning.')}</small>
+              </div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-icon gold"><ShieldCheck size={20}/></div>
+              <div>
+                <strong>{t(language, 'Evidence-Based Eligibility')}</strong>
+                <small>{t(language, 'Every extracted condition is cross-referenced with exact page citations and source quotes.')}</small>
+              </div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-icon blue"><Languages size={20}/></div>
+              <div>
+                <strong>{t(language, 'Multilingual Assistance')}</strong>
+                <small>{t(language, 'Native English and Kannada processing for documents, summaries, and interactive assistance.')}</small>
+              </div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-icon cyan"><SearchCheck size={20}/></div>
+              <div>
+                <strong>{t(language, 'Interactive Document Verification')}</strong>
+                <small>{t(language, 'Click any requirement or citation to jump directly to the relevant document page.')}</small>
+              </div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-icon teal"><CheckSquare size={20}/></div>
+              <div>
+                <strong>{t(language, 'Personalized Application Guidance')}</strong>
+                <small>{t(language, 'Tailored roadmaps, prioritized checklists, and offline export to keep you on schedule.')}</small>
+              </div>
+            </div>
           </div>
 
           <section id="analyzer" className="analyzer-section" aria-busy={loading}>
             <div className="section-heading">
-              <div><span className="section-kicker">01 / DOCUMENT WORKSPACE</span><h2>{t(language, 'Analyze a scholarship notice')}</h2><p>{language === 'kn' ? 'ಪ್ರಕಟಣೆ ಅಪ್‌ಲೋಡ್ ಮಾಡಿ; ವೈಯಕ್ತಿಕ ಮಾರ್ಗದರ್ಶನಕ್ಕಾಗಿ ಐಚ್ಛಿಕ ಮಾಹಿತಿ ನೀಡಿ.' : 'Upload a notice and add optional information to personalize the guidance.'}</p></div>
+              <div>
+                <span className="section-kicker">01 / DOCUMENT WORKSPACE</span>
+                <h2>{t(language, 'Analyze a scholarship notice')}</h2>
+                <p>{language === 'kn' ? 'ಪ್ರಕಟಣೆ ಅಪ್‌ಲೋಡ್ ಮಾಡಿ; ವೈಯಕ್ತಿಕ ಮಾರ್ಗದರ್ಶನಕ್ಕಾಗಿ ಐಚ್ಛಿಕ ಮಾಹಿತಿ ನೀಡಿ.' : 'Upload a notice and add optional information to personalize the guidance.'}</p>
+              </div>
               <Pill tone="quiet"><LockKeyhole size={13} /> {t(language, 'No upload history')}</Pill>
             </div>
             <div className="form-grid">
               <div className="card upload-card">
-                <div className="card-heading"><div className="card-number"><FileText size={18}/></div><div><h3>{t(language, 'Your document')}</h3><p>{t(language, 'Upload the original scholarship notice.')}</p></div></div>
+                <div className="card-heading">
+                  <div className="card-number"><FileText size={18}/></div>
+                  <div>
+                    <h3>{t(language, 'Your document')}</h3>
+                    <p>{t(language, 'Upload the original scholarship notice.')}</p>
+                  </div>
+                </div>
                 <input ref={fileInput} className="sr-only" type="file" disabled={loading} accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" onChange={(e: ChangeEvent<HTMLInputElement>) => chooseFile(e.target.files?.[0])} aria-label="Choose a scholarship notice" />
                 {!file ? (
                   <div className={`dropzone${isDragging ? ' dragging' : ''}`} role="button" tabIndex={0}
@@ -287,7 +378,7 @@ export default function App() {
                     onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.current?.click(); } }}
                     onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
                     onDragLeave={() => setIsDragging(false)} onDrop={onDrop}>
-                    <div className="upload-image"><CloudUpload size={30} strokeWidth={1.6} /></div>
+                    <div className="upload-image"><CloudUpload size={32} strokeWidth={1.8} /></div>
                     <strong>{t(language, 'Drag & drop your file here')}</strong>
                     <span>{language === 'kn' ? 'ಅಥವಾ' : 'or'} <u>{t(language, 'browse from your device')}</u></span>
                     <div className="upload-formats"><span>PDF</span><span>JPG</span><span>PNG</span><span>MAX 8 MB</span></div>
@@ -310,24 +401,42 @@ export default function App() {
                 </div>
               </div>
               <div className="card details-card">
-                <div className="card-heading"><div className="card-number"><GraduationCap size={18}/></div><div><h3>{t(language, 'Student profile')} <span className="optional-tag">{language === 'kn' ? 'ಐಚ್ಛಿಕ' : 'OPTIONAL'}</span></h3><p>{t(language, 'Helps compare eligibility requirements.')}</p></div></div>
+                <div className="card-heading">
+                  <div className="card-number"><GraduationCap size={18}/></div>
+                  <div>
+                    <h3>{t(language, 'Student profile')} <span className="optional-tag">{language === 'kn' ? 'ಐಚ್ಛಿಕ' : 'OPTIONAL'}</span></h3>
+                    <p>{t(language, 'Helps compare eligibility requirements.')}</p>
+                  </div>
+                </div>
                 <fieldset className="form-fields" disabled={loading} aria-label={t(language, 'Student profile')}>
+                  <div className="field-group-header"><span>{t(language, 'Academic Information')}</span></div>
                   <div className="field-row">
                     <Field label={t(language, 'Education level')} id="education"><select id="education" value={profile.education_level} onChange={e => setField('education_level', e.target.value)}><option>Not specified</option><option>PUC / Class 12</option><option>Undergraduate</option><option>Postgraduate</option><option>Diploma</option><option>Other</option></select></Field>
-                    <Field label={t(language, 'State of residence')} id="state"><select id="state" value={profile.state} onChange={e => setField('state', e.target.value)}><option>Not specified</option><option>Karnataka</option><option>Maharashtra</option><option>Tamil Nadu</option><option>Kerala</option><option>Andhra Pradesh</option><option>Telangana</option><option>Other</option></select></Field>
-                  </div>
-                  <div className="field-row">
-                    <Field label={t(language, 'Annual family income (₹)')} id="income"><input id="income" type="number" min="0" step="1" placeholder="e.g. 250000" value={profile.annual_income} onChange={e => setField('annual_income', e.target.value)}/></Field>
                     <Field label={t(language, 'Previous marks (%)')} id="marks"><input id="marks" type="number" min="0" max="100" step="0.01" placeholder="e.g. 85" value={profile.percentage} onChange={e => setField('percentage', e.target.value)}/></Field>
                   </div>
-                  <Field label={t(language, 'Category')} id="category"><select id="category" value={profile.category} onChange={e => setField('category', e.target.value)}><option>Not specified</option><option>General</option><option>OBC</option><option>SC</option><option>ST</option><option>EWS</option><option>Prefer not to say</option></select></Field>
-                  <div className="field-row"><Field label={t(language, 'Age')} id="age"><input id="age" type="number" min="0" max="120" step="1" value={profile.age} onChange={e => setField('age', e.target.value)}/></Field><Field label={t(language, 'Study mode')} id="study-mode"><select id="study-mode" value={profile.study_mode} onChange={e => setField('study_mode', e.target.value)}><option>Not specified</option><option>Full-time</option><option>Part-time</option><option>Distance</option></select></Field></div>
+                  <div className="field-group-header"><span>{t(language, 'Financial & Category')}</span></div>
+                  <div className="field-row">
+                    <Field label={t(language, 'Annual family income (₹)')} id="income"><input id="income" type="number" min="0" step="1" placeholder="e.g. 250000" value={profile.annual_income} onChange={e => setField('annual_income', e.target.value)}/></Field>
+                    <Field label={t(language, 'Category')} id="category"><select id="category" value={profile.category} onChange={e => setField('category', e.target.value)}><option>Not specified</option><option>General</option><option>OBC</option><option>SC</option><option>ST</option><option>EWS</option><option>Prefer not to say</option></select></Field>
+                  </div>
+                  <div className="field-group-header"><span>{t(language, 'Personal Details')}</span></div>
+                  <Field label={t(language, 'State of residence')} id="state"><select id="state" value={profile.state} onChange={e => setField('state', e.target.value)}><option>Not specified</option><option>Karnataka</option><option>Maharashtra</option><option>Tamil Nadu</option><option>Kerala</option><option>Andhra Pradesh</option><option>Telangana</option><option>Other</option></select></Field>
+                  <div className="field-row">
+                    <Field label={t(language, 'Age')} id="age"><input id="age" type="number" min="0" max="120" step="1" placeholder="e.g. 21" value={profile.age} onChange={e => setField('age', e.target.value)}/></Field>
+                    <Field label={t(language, 'Study mode')} id="study-mode"><select id="study-mode" value={profile.study_mode} onChange={e => setField('study_mode', e.target.value)}><option>Not specified</option><option>Full-time</option><option>Part-time</option><option>Distance</option></select></Field>
+                  </div>
                 </fieldset>
                 <div className="profile-footnote"><Info size={15}/><span>{language === 'kn' ? 'ನೀವು ನೀಡಿದ ದಾಖಲೆ ಮತ್ತು ಮಾಹಿತಿ Google API ಗೆ ಹೋಗುತ್ತದೆ. ಸಹಾಯಕಕ್ಕಾಗಿ ಸರ್ವರ್ ಮೆಮೊರಿಯಲ್ಲಿ 20 ನಿಮಿಷಗಳವರೆಗೆ ಇರುತ್ತದೆ.' : 'The notice and supplied details go to Google’s model API. Document context is kept in server memory for up to 20 minutes for chat; reset removes it early.'}</span></div>
               </div>
             </div>
             <div className="action-card">
-              <div className="action-text"><div className="magic-icon"><WandSparkles size={21}/></div><span><strong>{t(language, 'A clearer next step starts here.')}</strong><small>{t(language, 'Your notice. Your details. Evidence you can inspect.')}</small></span></div>
+              <div className="action-text">
+                <div className="magic-icon"><WandSparkles size={22}/></div>
+                <div>
+                  <strong>{t(language, 'A clearer next step starts here.')}</strong>
+                  <small>{t(language, 'Your notice. Your details. Evidence you can inspect.')}</small>
+                </div>
+              </div>
               <button className="analyze-btn" onClick={() => void submit()} disabled={loading}>
                 {loading ? <><LoaderCircle className="spinning" size={19}/> {t(language, 'Analyzing…')}</> : <><Sparkles size={19}/> {t(language, 'Analyze with Gemma 4')} <ArrowRight size={17}/></>}
               </button>
@@ -335,61 +444,155 @@ export default function App() {
             {healthError && <div className="inline-notice warning"><AlertTriangle size={18}/><span>Backend is unreachable. Start FastAPI on port 8000 and refresh.</span></div>}
             {health && !health.gemma_configured && <div className="inline-notice warning"><Info size={18}/><span>Gemma is not configured yet. Add your API key to <code>backend/.env</code>. Upload and preview work without it; analysis requires a key.</span></div>}
             {error && <div role="alert" className="inline-notice error"><AlertTriangle size={18}/><span>{friendlyError(language, error)}</span><button disabled={loading} onClick={() => void submit()}>{t(language, 'Retry')}</button><button onClick={() => setError('')} aria-label="Dismiss error"><X size={16}/></button></div>}
-            {loading && <div className="loading-card" role="status"><div className="loading-visual"><ScanLine size={28}/></div><div><strong>Gemma 4 is reading your notice</strong><p>Analyzing uploaded pages, translating instructions, and comparing requirements. Processing time depends on document length and API availability.</p></div><LoaderCircle className="spinning" size={24}/></div>}
-          </section>
-
-          <section className="results-section" id="results" ref={resultsRef}>
-            <div className="section-heading results-heading"><div><span className="section-kicker">02 / YOUR INSIGHTS</span><h2>{t(language, 'Analysis results')}</h2><p>{language === 'kn' ? 'ಸ್ಪಷ್ಟ ವಿವರಗಳು, ಮೂಲ ಉಲ್ಲೇಖಗಳು ಮತ್ತು ಮುಂದಿನ ಕ್ರಮಗಳು.' : 'Clear takeaways, cited details, and actionable next steps.'}</p></div>
-              {analysis && <button className="reset-btn" onClick={reset}><RotateCcw size={15}/> {t(language, 'New analysis')}</button>}
-            </div>
-            {!analysis ? (
-              <div className="results-empty card"><div className="empty-graphic"><FolderOpen size={39}/><span className="empty-star">✦</span></div><strong>Your clarity starts here</strong><p>Upload a scholarship notice above to see requirements, deadlines, eligibility guidance, and a document checklist.</p><a href="#analyzer">Analyze your first document <ArrowRight size={16}/></a></div>
-            ) : (
-              <div className="results-content">
-              <ResultHeader analysis={analysis} language={language}/>
-              <div className={`evidence-workspace${viewerOpen ? ' with-viewer' : ''}`}>
-              {viewerOpen && previewUrl && <Suspense fallback={<p role="status">Loading viewer…</p>}><DocumentViewer url={previewUrl} isPdf={file?.type === 'application/pdf' || /\.pdf$/i.test(file?.name ?? '')} fact={evidence} language={language} close={() => setViewerOpen(false)}/></Suspense>}
-              <div className="result-wrapper analysis-panel">
-                <div className="result-tabs" role="tablist" aria-label="Analysis sections">
-                  {resultTabs.map(([key, label, Icon], index) =>
-                    <button key={key} id={`result-tab-${key}`} role="tab" aria-controls="analysis-tabpanel" tabIndex={tab === key ? 0 : -1} aria-selected={tab === key} className={tab === key ? 'active' : ''} onClick={() => setTab(key)}
-                      onKeyDown={event => {
-                        const next = event.key === 'ArrowRight' ? (index + 1) % resultTabs.length : event.key === 'ArrowLeft' ? (index + resultTabs.length - 1) % resultTabs.length : event.key === 'Home' ? 0 : event.key === 'End' ? resultTabs.length - 1 : null;
-                        if (next !== null) { event.preventDefault(); setTab(resultTabs[next][0]); document.getElementById(`result-tab-${resultTabs[next][0]}`)?.focus(); }
-                      }}><Icon size={15}/>{t(language, label)}</button>
-                  )}
-                  {!viewerOpen && <button title={t(language, 'View evidence')} aria-label={t(language, 'View evidence')} onClick={() => setViewerOpen(true)}><BookOpen size={16}/></button>}
+            {loading && (
+              <div className="loading-card" role="status">
+                <div className="loading-visual"><ScanLine size={28}/></div>
+                <div>
+                  <strong>Gemma 4 is reading your notice</strong>
+                  <p className="loading-stage-text">{t(language, loadingStages[loadingStage])}</p>
+                  <p className="loading-subtext">Analyzing uploaded pages, translating instructions, and comparing requirements. Processing time depends on document length and API availability.</p>
                 </div>
-                <EligibilitySummary criteria={analysis.criteria} language={language}/>
-                <div className="result-panel" id="analysis-tabpanel" role="tabpanel" tabIndex={0} aria-labelledby={`result-tab-${tab}`}>
-                {tab === 'overview' && <AnalysisOverview analysis={analysis} language={language} navigate={setTab}/>}
-                {tab === 'eligibility' && <div className="detail-list"><div className="result-card-heading"><GraduationCap size={18}/><h4>{t(language, 'Eligibility requirements')}</h4></div>
-                  <div className="eligibility-overall" role="status"><strong>{analysis.eligibility_overall === 'appears_to_meet_extracted' ? (language === 'kn' ? 'ಪಡೆಯಲಾದ ನಿಯಮಗಳನ್ನು ಪೂರೈಸಿದಂತೆ ಕಾಣುತ್ತದೆ' : 'Appears to meet extracted rules') : analysis.eligibility_overall === 'possible_mismatch' ? (language === 'kn' ? 'ಸಂಭಾವ್ಯ ಹೊಂದಾಣಿಕೆ ಇಲ್ಲ' : 'Possible eligibility mismatch') : t(language, 'Needs verification')}</strong><p>{language === 'kn' ? 'ಇದು ಅಧಿಕೃತ ಅರ್ಹತಾ ನಿರ್ಣಯವಲ್ಲ. ಮೂಲ ಪ್ರಕಟಣೆ ಮತ್ತು ಅಧಿಕೃತ ಸಂಸ್ಥೆಯೊಂದಿಗೆ ಪರಿಶೀಲಿಸಿ.' : 'Preliminary only. Extracted rules may be incomplete; confirm with the official provider.'}</p></div>
-                  {analysis.criteria.length ? analysis.criteria.map((item, index) => <div className="criterion" key={index}><div className={`criterion-icon ${item.status}`}><StatusIcon status={item.status}/></div><div><strong>{language === 'kn' ? item.requirement_kn || item.requirement : item.requirement}</strong>
-                    <span className={`assessment ${item.status}`}>{t(language, item.status === 'likely_meets' ? 'Appears satisfied' : item.status === 'may_not_meet' ? 'Possible mismatch' : 'Needs verification')}</span>
-                    <p>{t(language, 'Extracted condition')}: {item.rule ? `${({ lt: '<', lte: '≤', gt: '>', gte: '≥', eq: '=', one_of: '∈' } as Record<string, string>)[item.rule.operator] ?? '?'} ${item.rule.value_number ?? item.rule.values.join(', ')}` : item.evidence || t(language, 'Needs verification')}</p>
-                    <p>{t(language, 'Student value')}: {item.student_value === null || item.student_value === undefined || item.student_value === 'Not specified' ? t(language, 'Not supplied') : String(item.student_value)}</p>
-                    <p className={language === 'kn' ? 'kannada-text' : ''}>{language === 'kn' ? item.explanation_kn : item.explanation_en}</p><SourceTag {...item}/></div></div>) : <p>{t(language, 'No eligibility criteria could be confidently extracted. Check the official notice.')}</p>}
-                </div>}
-                {tab === 'documents' && <div className="detail-list"><div className="documents-header"><div className="result-card-heading"><ClipboardCheck size={18}/><h4>{t(language, 'Required documents')}</h4></div><button className="export-btn" onClick={() => exportChecklist(analysis)}><Download size={16}/>{t(language, 'Download checklist')}</button></div>
-                  <p>{t(language, 'Checklist completion does not submit an application.')}</p>
-                  {analysis.documents.length ? <><div className="document-progress"><div style={{ width: `${doneDocuments.length / analysis.documents.length * 100}%` }}/></div>{analysis.documents.map((doc, index) => <div className={`document-item${doneDocuments.includes(`${index}`) ? ' completed' : ''}`} key={index}>
-                    <label><input type="checkbox" checked={doneDocuments.includes(`${index}`)} onChange={() => toggleDone(`${index}`)}/><strong>{language === 'kn' ? doc.name_kn || doc.name : doc.name}</strong></label><SourceTag {...doc}/></div>)}</> : <p>{t(language, 'No document requirements were clearly extracted. Review the notice manually.')}</p>}
-                </div>}
-                {tab === 'roadmap' && <ApplicationRoadmap key={analysis.request_id} sessionId={analysis.request_id} tasks={analysis.roadmap ?? []} language={language}/>}
-                <div hidden={tab !== 'assistant'}><ScholarshipChat key={analysis.session_id} sessionId={analysis.session_id} language={language}/></div>
-                </div>
-                {(analysis.unknowns.length > 0 || analysis.warnings.length > 0) && <div className="review-warning"><AlertTriangle size={19}/><div><strong>{t(language, 'Before you apply, double-check these details')}</strong><ul>{(language === 'kn' ? [...(analysis.unknowns_kn?.length ? analysis.unknowns_kn : analysis.unknowns), ...(analysis.warnings_kn?.length ? analysis.warnings_kn : analysis.warnings)] : [...analysis.unknowns, ...analysis.warnings]).map((warning, index) => <li key={index}>{warning}</li>)}</ul></div></div>}
-                <div className="result-disclaimer"><ShieldCheck size={17}/>{language === 'kn' ? 'AI ಮಾರ್ಗದರ್ಶನ ಮಾತ್ರ. ಮೂಲ ಪ್ರಕಟಣೆ ಮತ್ತು ಅಧಿಕೃತ ಸಂಸ್ಥೆಯೊಂದಿಗೆ ಪರಿಶೀಲಿಸಿ.' : analysis.disclaimer} <span>Request ID: {analysis.request_id}</span></div>
-              </div>
-              </div>
+                <LoaderCircle className="spinning" size={24}/>
               </div>
             )}
           </section>
 
-          <section className="how-section" id="how-it-works"><span className="section-kicker">BUILT FOR CLARITY</span><h2>From paperwork to possibilities.</h2><div className="how-grid"><div><div className="how-icon"><UploadCloud size={22}/></div><b>01 · Upload</b><p>Add a PDF, screenshot, or photo of a scholarship notice.</p></div><div><div className="how-icon"><Sparkles size={22}/></div><b>02 · Understand</b><p>Gemma 4 interprets the document and organizes key details.</p></div><div><div className="how-icon"><CheckCircle2 size={22}/></div><b>03 · Take action</b><p>Review eligibility, check documents, and follow a clear plan.</p></div></div></section>
+          <section className="results-section" id="results" ref={resultsRef}>
+            <div className="section-heading results-heading">
+              <div>
+                <span className="section-kicker">02 / YOUR INSIGHTS</span>
+                <h2>{t(language, 'Analysis results')}</h2>
+                <p>{language === 'kn' ? 'ಸ್ಪಷ್ಟ ವಿವರಗಳು, ಮೂಲ ಉಲ್ಲೇಖಗಳು ಮತ್ತು ಮುಂದಿನ ಕ್ರಮಗಳು.' : 'Clear takeaways, cited details, and actionable next steps.'}</p>
+              </div>
+              {analysis && <button className="reset-btn" onClick={reset}><RotateCcw size={15}/> {t(language, 'New analysis')}</button>}
+            </div>
+            {!analysis ? (
+              <div className="results-empty card">
+                <div className="empty-graphic"><FolderOpen size={42}/><span className="empty-star">✦</span></div>
+                <strong>Your clarity starts here</strong>
+                <p>Upload a scholarship notice above to see requirements, deadlines, eligibility guidance, and a document checklist.</p>
+                <a href="#analyzer">Analyze your first document <ArrowRight size={16}/></a>
+              </div>
+            ) : (
+              <div className="results-content">
+                <ResultHeader analysis={analysis} language={language}/>
+                {needsContentTranslation(analysis) && <div className="inline-notice warning" role="status"><Info size={18}/><span>{t(language, 'Some document-content translations are unavailable. Your analysis and source citations are retained.')}</span><button disabled={translating} onClick={() => void retryTranslation()}>{t(language, translating ? 'Translating content…' : 'Retry translation')}</button></div>}
+                {translationError && <div className="inline-notice error" role="alert"><AlertTriangle size={18}/><span>{friendlyError(language, translationError)}</span></div>}
+                <div className={`evidence-workspace${viewerOpen ? ' with-viewer' : ''}`}>
+                  {viewerOpen && previewUrl && (
+                    <Suspense fallback={<p role="status">Loading viewer…</p>}>
+                      <DocumentViewer url={previewUrl} isPdf={file?.type === 'application/pdf' || /\.pdf$/i.test(file?.name ?? '')} fact={evidence} language={language} close={() => setViewerOpen(false)}/>
+                    </Suspense>
+                  )}
+                  <div className="result-wrapper analysis-panel">
+                    <div className="result-tabs" role="tablist" aria-label="Analysis sections">
+                      {resultTabs.map(([key, label, Icon], index) =>
+                        <button key={key} id={`result-tab-${key}`} role="tab" aria-controls="analysis-tabpanel" tabIndex={tab === key ? 0 : -1} aria-selected={tab === key} className={tab === key ? 'active' : ''} onClick={() => setTab(key)}
+                          onKeyDown={event => {
+                            const next = event.key === 'ArrowRight' ? (index + 1) % resultTabs.length : event.key === 'ArrowLeft' ? (index + resultTabs.length - 1) % resultTabs.length : event.key === 'Home' ? 0 : event.key === 'End' ? resultTabs.length - 1 : null;
+                            if (next !== null) { event.preventDefault(); setTab(resultTabs[next][0]); document.getElementById(`result-tab-${resultTabs[next][0]}`)?.focus(); }
+                          }}><Icon size={15}/>{t(language, label)}</button>
+                      )}
+                      {!viewerOpen && <button className="tab-open-viewer" title={t(language, 'View evidence')} aria-label={t(language, 'View evidence')} onClick={() => setViewerOpen(true)}><BookOpen size={16}/></button>}
+                    </div>
+                    <EligibilitySummary criteria={analysis.criteria} language={language}/>
+                    <div className="result-panel" id="analysis-tabpanel" role="tabpanel" tabIndex={0} aria-labelledby={`result-tab-${tab}`}>
+                      {tab === 'overview' && <AnalysisOverview analysis={analysis} language={language} navigate={setTab}/>}
+                      {tab === 'eligibility' && (
+                        <div className="detail-list">
+                          <div className="result-card-heading"><GraduationCap size={18}/><h4>{t(language, 'Eligibility requirements')}</h4></div>
+                          <div className="eligibility-overall" role="status">
+                            <strong>{analysis.eligibility_overall === 'appears_to_meet_extracted' ? (language === 'kn' ? 'ಪಡೆಯಲಾದ ನಿಯಮಗಳನ್ನು ಪೂರೈಸಿದಂತೆ ಕಾಣುತ್ತದೆ' : 'Appears to meet extracted rules') : analysis.eligibility_overall === 'possible_mismatch' ? (language === 'kn' ? 'ಸಂಭಾವ್ಯ ಹೊಂದಾಣಿಕೆ ಇಲ್ಲ' : 'Possible eligibility mismatch') : t(language, 'Needs verification')}</strong>
+                            <p>{language === 'kn' ? 'ಇದು ಅಧಿಕೃತ ಅರ್ಹತಾ ನಿರ್ಣಯವಲ್ಲ. ಮೂಲ ಪ್ರಕಟಣೆ ಮತ್ತು ಅಧಿಕೃತ ಸಂಸ್ಥೆಯೊಂದಿಗೆ ಪರಿಶೀಲಿಸಿ.' : 'Preliminary only. Extracted rules may be incomplete; confirm with the official provider.'}</p>
+                          </div>
+                          {analysis.criteria.length ? analysis.criteria.map((item, index) => (
+                            <div className="criterion" key={index}>
+                              <div className={`criterion-icon ${item.status}`}><StatusIcon status={item.status}/></div>
+                              <div>
+                                <strong>{contentText(language, item.requirement, item.requirement_kn)}</strong>
+                                <span className={`assessment ${item.status}`}>{t(language, item.status === 'likely_meets' ? 'Appears satisfied' : item.status === 'may_not_meet' ? 'Possible mismatch' : 'Needs verification')}</span>
+                                <p>{t(language, 'Extracted condition')}: {item.rule ? `${({ lt: '<', lte: '≤', gt: '>', gte: '≥', eq: '=', one_of: '∈' } as Record<string, string>)[item.rule.operator] ?? '?'} ${item.rule.value_number ?? item.rule.values.join(', ')}` : item.evidence || t(language, 'Needs verification')}</p>
+                                <p>{t(language, 'Student value')}: {item.student_value === null || item.student_value === undefined || item.student_value === 'Not specified' ? t(language, 'Not supplied') : String(item.student_value)}</p>
+                                <p className={language === 'kn' ? 'kannada-text' : ''}>{contentText(language, item.explanation_en, item.explanation_kn)}</p>
+                                <SourceTag {...item}/>
+                              </div>
+                            </div>
+                          )) : <p>{t(language, 'No eligibility criteria could be confidently extracted. Check the official notice.')}</p>}
+                        </div>
+                      )}
+                      {tab === 'documents' && (
+                        <div className="detail-list">
+                          <div className="documents-header">
+                            <div className="result-card-heading"><ClipboardCheck size={18}/><h4>{t(language, 'Required documents')}</h4></div>
+                            <button className="export-btn" onClick={() => exportChecklist(analysis, language)}><Download size={16}/>{t(language, 'Download checklist')}</button>
+                          </div>
+                          <p>{t(language, 'Checklist completion does not submit an application.')}</p>
+                          {analysis.documents.length ? (
+                            <>
+                              <div className="document-progress"><div style={{ width: `${doneDocuments.length / analysis.documents.length * 100}%` }}/></div>
+                              {analysis.documents.map((doc, index) => (
+                                <div className={`document-item${doneDocuments.includes(`${index}`) ? ' completed' : ''}`} key={index}>
+                                  <label><input type="checkbox" checked={doneDocuments.includes(`${index}`)} onChange={() => toggleDone(`${index}`)}/><strong>{contentText(language, doc.name, doc.name_kn)}</strong></label>
+                                  <SourceTag {...doc}/>
+                                </div>
+                              ))}
+                            </>
+                          ) : <p>{t(language, 'No document requirements were clearly extracted. Review the notice manually.')}</p>}
+                        </div>
+                      )}
+                      {tab === 'roadmap' && <ApplicationRoadmap key={analysis.request_id} sessionId={analysis.request_id} tasks={analysis.roadmap ?? []} language={language}/>}
+                      <div hidden={tab !== 'assistant'}><ScholarshipChat key={analysis.session_id} sessionId={analysis.session_id} language={language}/></div>
+                    </div>
+                    {(analysis.unknowns.length > 0 || analysis.warnings.length > 0) && (
+                      <div className="review-warning">
+                        <AlertTriangle size={19}/>
+                        <div>
+                          <strong>{t(language, 'Before you apply, double-check these details')}</strong>
+                          <ul>
+                            {[...analysis.unknowns.map((item, i) => contentText(language, item, analysis.unknowns_kn?.[i])), ...analysis.warnings.map((item, i) => contentText(language, item, analysis.warnings_kn?.[i]))].map((warning, index) => (
+                              <li key={index}>{warning}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      </div>
+                    )}
+                    <div className="result-disclaimer">
+                      <ShieldCheck size={17}/>
+                      {language === 'kn' ? 'AI ಮಾರ್ಗದರ್ಶನ ಮಾತ್ರ. ಮೂಲ ಪ್ರಕಟಣೆ ಮತ್ತು ಅಧಿಕೃತ ಸಂಸ್ಥೆಯೊಂದಿಗೆ ಪರಿಶೀಲಿಸಿ.' : analysis.disclaimer}
+                      <span>Request ID: {analysis.request_id}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </section>
+
+          <section className="how-section" id="how-it-works">
+            <span className="section-kicker">BUILT FOR CLARITY</span>
+            <h2>From paperwork to possibilities.</h2>
+            <div className="how-grid">
+              <div>
+                <div className="how-icon"><UploadCloud size={24}/></div>
+                <b>01 · Upload</b>
+                <p>Add a PDF, screenshot, or photo of a scholarship notice.</p>
+              </div>
+              <div>
+                <div className="how-icon"><Sparkles size={24}/></div>
+                <b>02 · Understand</b>
+                <p>Gemma 4 interprets the document and organizes key details.</p>
+              </div>
+              <div>
+                <div className="how-icon"><CheckCircle2 size={24}/></div>
+                <b>03 · Take action</b>
+                <p>Review eligibility, check documents, and follow a clear plan.</p>
+              </div>
+            </div>
+          </section>
         </main>
-        <footer className="page-footer"><span><BrandIcon small/> FormBridge AI <span>·</span> An Avengineers project</span><span><Clock3 size={13}/> Built for Hacktoberfest 2026 <span>·</span> Powered by Gemma 4</span></footer>
+        <footer className="page-footer">
+          <span><BrandIcon small/> FormBridge AI <span>·</span> An Avengineers project</span>
+          <span><Clock3 size={13}/> Built for Hacktoberfest 2026 <span>·</span> Powered by Gemma 4</span>
+        </footer>
       </div>
     </div>
     </EvidenceContext.Provider>

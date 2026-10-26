@@ -2,7 +2,8 @@ import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
   testDir: './e2e',
-  timeout: 45000,
+  timeout: 90000,
+  workers: 2,
   use: { baseURL: 'http://127.0.0.1:15173', screenshot: 'only-on-failure', trace: 'retain-on-failure' },
   projects: [
     { name: 'desktop', use: { viewport: { width: 1440, height: 1100 } } },

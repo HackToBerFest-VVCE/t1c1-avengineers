@@ -15,6 +15,7 @@ export interface SourceFact {
   verification?: Verification | null;
 }
 export interface Criterion extends SourceFact {
+  requires_manual_review?: boolean;
   requirement: string;
   requirement_kn?: string | null;
   student_value?: string | number | null;

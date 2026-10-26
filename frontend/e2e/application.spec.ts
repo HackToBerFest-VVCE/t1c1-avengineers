@@ -10,18 +10,18 @@ test('upload, verified evidence, eligibility, bilingual chat, roadmap and downlo
   await page.getByRole('button', { name: 'Analyze with Gemma 4' }).click();
   await expect(page.getByRole('heading', { name: 'Riverbend Student Support Grant 2026' })).toBeVisible();
   await expect(page.locator('.document-canvas canvas')).toBeVisible();
-  await page.locator('#results').screenshot({ path: `test-results/overview-${test.info().project.name}.png` });
+  await page.locator('#results').screenshot({ path: `test-results/overview-${test.info().project.name}.png`, animations: 'disabled' });
   await page.getByRole('tab', { name: 'Eligibility', exact: true }).click();
   await expect(page.getByRole('tabpanel', { name: 'Eligibility', exact: true }).getByText('Appears to meet extracted rules', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: /Page 1.*Applicants must have/ }).click();
   await expect(page.locator('.evidence-quote')).toContainText('Verified quotation');
   await expect(page.getByLabel('Page', { exact: true })).toHaveValue('1');
-  await page.locator('#results').screenshot({ path: `test-results/eligibility-${test.info().project.name}.png` });
+  await page.locator('#results').screenshot({ path: `test-results/eligibility-${test.info().project.name}.png`, animations: 'disabled' });
   await page.getByRole('tab', { name: 'Assistant', exact: true }).click();
   await page.getByLabel('Ask about this notice').fill('What documents should I prepare?');
   await page.getByRole('button', { name: 'Send question' }).click();
   await expect(page.locator('.chat-message.assistant')).toContainText('Prepare your previous examination marksheet');
-  await page.locator('#results').screenshot({ path: `test-results/chat-${test.info().project.name}.png` });
+  await page.locator('#results').screenshot({ path: `test-results/chat-${test.info().project.name}.png`, animations: 'disabled' });
   await page.getByRole('button', { name: 'ಕನ್ನಡ', exact: true }).click();
   await page.getByLabel('ಈ ಪ್ರಕಟಣೆಯ ಬಗ್ಗೆ ಕೇಳಿ').fill('ಯಾವ ದಾಖಲೆಗಳು ಬೇಕು?');
   await page.getByRole('button', { name: 'ಪ್ರಶ್ನೆ ಕಳುಹಿಸಿ' }).click();
@@ -48,7 +48,7 @@ test('upload, verified evidence, eligibility, bilingual chat, roadmap and downlo
   });
   expect(nonblank).toBe(true);
   expect(errors).toEqual([]);
-  await page.screenshot({ path: `test-results/workspace-${test.info().project.name}.png`, fullPage: true });
+  await page.screenshot({ path: `test-results/workspace-${test.info().project.name}.png`, fullPage: true, animations: 'disabled' });
 });
 
 test('real PDF.js navigation and zoom on a multipage PDF', async ({ page, request }) => {
@@ -81,7 +81,7 @@ test('provider failure preserves input and exposes retry', async ({ page }) => {
 test('image analysis, workspace navigation, keyboard focus and reduced motion', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.goto('/');
-  await page.screenshot({ path: `test-results/dashboard-${test.info().project.name}.png` });
+  await page.screenshot({ path: `test-results/dashboard-${test.info().project.name}.png`, animations: 'disabled' });
   await page.keyboard.press('Tab');
   await expect(page.getByRole('link', { name: 'Skip to workspace' })).toBeFocused();
   await page.keyboard.press('Enter');

@@ -1,6 +1,7 @@
 from enum import Enum
 from typing import Literal
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
+from .numbers import parse_number
 
 
 class CriterionStatus(str, Enum):
@@ -24,6 +25,11 @@ class StudentProfile(BaseModel):
     age: int | None = Field(default=None, ge=0, le=120)
     study_mode: str = Field(default="Not specified", max_length=120)
     model_config = {"allow_inf_nan": False}
+
+    @field_validator("annual_income", "percentage", "age", mode="before")
+    @classmethod
+    def numeric_input(cls, value, info):
+        return parse_number(value, info.field_name)
 
 
 class Verification(BaseModel):
@@ -63,6 +69,11 @@ class EligibilityRule(BaseModel):
     values: list[str] = Field(default_factory=list)
     model_config = {"allow_inf_nan": False}
 
+    @field_validator("value_number", mode="before")
+    @classmethod
+    def numeric_threshold(cls, value, info):
+        return parse_number(value, info.data.get("field", ""))
+
 
 class Criterion(SourceFact):
     requirement: str
@@ -72,6 +83,20 @@ class Criterion(SourceFact):
     explanation_kn: str = "ದಯವಿಟ್ಟು ಅರ್ಹತೆಯನ್ನು ಪರಿಶೀಲಿಸಿ."
     requirement_kn: str | None = None
     student_value: str | float | None = None
+    requires_manual_review: bool = False
+
+    @model_validator(mode="before")
+    @classmethod
+    def preserve_text_when_rule_invalid(cls, value):
+        if not isinstance(value, dict): return value
+        value = dict(value)
+        if value.get("rule") is not None:
+            try:
+                value["rule"] = EligibilityRule.model_validate(value["rule"])
+            except (ValidationError, TypeError, ValueError):
+                value["rule"] = None
+                value["requires_manual_review"] = True
+        return value
 
 
 class RequiredDocument(SourceFact):
@@ -93,10 +118,10 @@ class RoadmapTask(ActionStep):
 
 
 class ExtractedAnalysis(BaseModel):
-    title: str = "Unidentified scholarship or notice"
+    title: str = "Not specified in the notice"
     provider: str | None = None
-    summary_en: str = "The notice needs manual review."
-    summary_kn: str = "ಈ ಪ್ರಕಟಣೆಯನ್ನು ಪರಿಶೀಲಿಸಬೇಕಾಗಿದೆ."
+    summary_en: str = ""
+    summary_kn: str = ""
     summary_sources: list[SourceFact] = Field(default_factory=list)
     deadline: Deadline = Field(default_factory=Deadline)
     criteria: list[Criterion] = Field(default_factory=list)

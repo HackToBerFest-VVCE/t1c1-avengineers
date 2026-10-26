@@ -19,6 +19,7 @@ from .eligibility import assess_all
 from .sessions import SessionStore
 from .chat import answer_question
 from .roadmap import build_roadmap
+from .localization import repair_languages
 from .schemas import AnalysisResponse, HealthResponse, StudentProfile, ChatRequest, ChatAnswer, SessionRequest
 
 settings = get_settings()
@@ -138,6 +139,19 @@ async def reset_chat(body: SessionRequest):
         raise HTTPException(409, "Wait for the current answer before resetting chat.")
     session.history.clear()
     return {"status": "cleared"}
+
+
+@app.post("/api/analysis/translate")
+async def translate_analysis(body: SessionRequest):
+    session = require_session(body.session_id)
+    if session.lock.locked():
+        raise HTTPException(409, "An answer or translation is already being prepared. Please wait.")
+    async with session.lock:
+        candidate = session.analysis.model_copy(deep=True)
+        if not await repair_languages(candidate, settings):
+            raise HTTPException(502, "Document-content translation is unavailable. Try again later; your analysis is unchanged.")
+        session.analysis = candidate
+        return {**candidate.model_dump(), "roadmap": [task.model_dump() for task in build_roadmap(candidate, session.profile)]}
 
 
 @app.post("/api/session/delete")

@@ -3,7 +3,7 @@ import re
 import unicodedata
 from difflib import SequenceMatcher
 
-from .documents import PageImage
+from .documents import PageImage, reliable_page_text
 from .schemas import ExtractedAnalysis, SourceFact, Verification
 
 
@@ -20,7 +20,7 @@ def verify_citation(citation: SourceFact, pages: list[PageImage]) -> Verificatio
         return Verification(status="unverified", reason="Missing or invalid page reference.")
     text = pages[page - 1].text
     normalized = normalize(text)
-    if len(normalized) < 15 or not any(c.isalpha() for c in normalized):
+    if len(normalized) < 15 or not reliable_page_text(text):
         return Verification(reason="This page has no reliable text layer; inspect the image or scanned page manually.")
     quote = normalize(citation.evidence or "")
     if len(quote) < 6 or not any(c.isalpha() for c in quote):
@@ -44,4 +44,16 @@ def verify_citation(citation: SourceFact, pages: list[PageImage]) -> Verificatio
 def verify_analysis(analysis: ExtractedAnalysis, pages: list[PageImage]) -> None:
     for citation in [analysis.deadline, *analysis.summary_sources, *analysis.criteria,
                      *analysis.documents, *analysis.steps]:
-        citation.verification = verify_citation(citation, pages)
+        verify_source(citation, pages)
+
+
+def verify_source(citation: SourceFact, pages: list[PageImage]) -> None:
+    citation.verification = verify_citation(citation, pages)
+    quote = normalize(citation.evidence or "")
+    if citation.verification.status != "unverified" or len(quote) < 18:
+        return
+    matches = [page.page for page in pages if reliable_page_text(page.text) and quote in normalize(page.text)]
+    if len(matches) == 1:
+        citation.page = matches[0]
+        citation.verification = Verification(status="verified", matched_text=citation.evidence,
+            reason="Exact quotation independently located on this unique page; missing or incorrect page reference repaired.")

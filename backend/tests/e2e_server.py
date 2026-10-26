@@ -1,6 +1,7 @@
 """TEST ONLY: real HTTP stack with mocked Google transport. Never a deployment entrypoint."""
 import io
 import json
+from pathlib import Path
 
 import httpx
 from fastapi.responses import Response
@@ -10,6 +11,7 @@ from app import main
 from app.chat import answer_question
 from app.config import Settings
 from app.gemma import analyze_with_gemma
+from tests.notice_fixtures import notice
 
 NOTICE = {
     "title": "Riverbend Student Support Grant 2026",
@@ -27,10 +29,10 @@ NOTICE = {
 }
 
 
-def provider(request):
+def provider(request, analysis=NOTICE):
     body = json.loads(request.content)
     is_chat = "scholarship reasoning assistant" in body["systemInstruction"]["parts"][0]["text"]
-    result = NOTICE
+    result = analysis
     if is_chat:
         language = json.loads(body["contents"][-1]["parts"][0]["text"])["language"]
         result = {"answer": "Prepare your previous examination marksheet. This is preliminary guidance." if language == "en" else "ಹಿಂದಿನ ಪರೀಕ್ಷೆಯ ಅಂಕಪಟ್ಟಿಯನ್ನು ಸಿದ್ಧಪಡಿಸಿ. ಇದು ಪ್ರಾಥಮಿಕ ಮಾರ್ಗದರ್ಶನ.",
@@ -44,7 +46,13 @@ test_settings = Settings(gemini_api_key="test-only-not-a-credential")
 
 
 async def analyze(pages, profile, _settings):
-    return await analyze_with_gemma(pages, profile, test_settings, transport)
+    text = "\n".join(page.text for page in pages)
+    kind = next((kind for kind in "ABCD" if f"TEST FIXTURE {kind}" in text), None)
+    if not text.strip():
+        kind = "E"
+    response = notice(kind) if kind else NOTICE
+    fixture_transport = httpx.MockTransport(lambda request: provider(request, response))
+    return await analyze_with_gemma(pages, profile, test_settings, fixture_transport)
 
 
 async def chat(session, question, language, _settings):
@@ -54,6 +62,13 @@ async def chat(session, question, language, _settings):
 main.analyze_with_gemma = analyze
 main.answer_question = chat
 app = main.app
+
+
+@app.get("/test-only/fixtures/{kind}.pdf")
+async def fixture_pdf(kind: str):
+    if kind not in "ABCDE" or len(kind) != 1:
+        return Response(status_code=404)
+    return Response((Path(__file__).parent / "fixtures" / f"notice_{kind}.pdf").read_bytes(), media_type="application/pdf")
 
 
 @app.get("/test-only/multipage.pdf")

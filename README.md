@@ -1,4 +1,4 @@
-# FormBridge AI 4.0 - Premium AI Experience
+# FormBridge AI 5.0 - Ultimate UI Experience
 
 FormBridge AI explains scholarship notices with Google's multimodal Gemma 4.
 It reads PDF/JPG/PNG notices and produces English and Kannada guidance.
@@ -6,11 +6,26 @@ Students can inspect original pages, check citation verification, and compare ex
 A document-grounded assistant and application roadmap help students prepare their next steps.
 Built by Avengineers for VVCE Hacktoberfest 2026, Track 1 - Challenge A: Best Use of Gemma 4.
 
-## V4 Interface Upgrade
+## V5 Interface Upgrade (Ultimate UI Experience)
 
-V4 refines the existing workspace with a compact application shell, functional assistant/roadmap navigation, a shared design-token system, clearer result metadata, a document evidence toolbar, source badges, an assistant composer and a numbered application timeline. Desktop, laptop, tablet and mobile layouts preserve every v3 workflow. Keyboard tabs, modal focus handling, visible focus, reduced motion and Kannada font fallbacks are included.
+V5 elevates FormBridge AI into a world-class AI SaaS platform combining the precision of Linear, visual hierarchy of Stripe, and typography of modern AI copilots. Built on a premium design system centered on Midnight Navy (`#071426`), Deep Navy (`#0B1F3A`), and Electric Cyan (`#00D9F5`), V5 delivers:
+- **Atmospheric Dark Hero Workspace**: Compelling hero banner with radial cyan ambient glow, prominent "Analyze Scholarship Document" primary CTA, and 5 capability highlight cards for document intelligence, evidence citations, bilingual assistance, interactive verification, and personalized guidance.
+- **Header & Navigation Shell**: Fixed midnight navy sidebar with glowing active indicators, collapsible desktop navigation, mobile modal drawer, top navigation with dedicated Google Gemma 4 model pill indicator (`gemma-4-26b-a4b-it`), connection health badge, and instant language switch (EN/ಕನ್ನಡ).
+- **Intake & Profile Workspace**: Drag-and-drop file intake with cyan glow hover states, file format badges, image thumbnail preview, replacement actions, grouped student profile fields (Academic Information, Financial & Category, Personal Details), and multi-stage loading feedback during analysis.
+- **Split-Screen Evidence & Results Workspace**: PDF.js interactive viewer with zoom controls (50%–300%), page steppers, full-screen dialog expansion, and animated quote panels cross-referenced with exact document citations.
+- **Conversational Assistant & Roadmap**: Dedicated Gemma 4 copilot message cards, prompt chips, real-time checklist progress, and local roadmap storage with export and print capabilities.
 
-The backend, model, API client/contracts, verification, eligibility, session handling and retry behavior are unchanged from the supplied v3 ZIP. No runtime dependencies were added. See [UI/UX design documentation](docs/ui-ux-v4.md) for the design system and verification limits.
+This describes the original V5 interface release. The functionality repair below updates extraction, validation, eligibility, translations and evidence without redesigning the interface. See [UI/UX design documentation](docs/premium-ui-v5.md) for the original design system.
+
+## V5 Functionality Repair
+
+- All accepted pages now reach Gemma as explicitly numbered higher-resolution images plus reliable page text. The default five-page limit rejects longer PDFs completely; no partial-document success is presented. Supplemental text is capped at 30,000 characters per page with an explicit marker; the complete image is still supplied.
+- Wrapped/aliased model JSON is normalized narrowly. Empty/default/truncated results are errors, with at most one structured recovery request. Optional unsupported rules remain visible for manual review.
+- Indian currency, lakh, percentage and Kannada-digit formats are parsed only when unambiguous. Python compares supported source-backed rules; ambiguous/compound/exclusion conditions and unverified scans require review.
+- Missing/invalid dynamic English/Kannada fields receive one targeted real-model translation attempt. Invalid translations show an explicit unavailable message; Retry translation preserves the document, eligibility and chat without reanalysis. Literal numeric tokens are checked, but human semantic review is still necessary.
+- Original quotations survive validation. Only a unique exact match in reliable page text can repair an incorrect/missing page. Scans remain textually unverifiable. Page navigation and quote display are retained without fabricated highlights.
+
+See `FormBridge_AI_v5_Bug_Fix_Report.md` and `FormBridge_AI_v5_Regression_Checklist.md` for executed results, limitations and reproducible checks. Historical V3/V4 reports describe earlier releases, not this repair.
 
 ## Features
 
@@ -66,7 +81,7 @@ Backend variables (see `backend/.env.example`):
 | `MAX_UPLOAD_MB` | 8 | Upload byte limit (UI also enforces 8 MB) |
 | `MAX_PDF_PAGES` | 5 | PDF page limit |
 | `GEMMA_TIMEOUT_SECONDS` | 40 | Per-attempt network timeout; connect timeout 10s |
-| `GEMMA_MAX_RETRIES` | 2 | At most 3 total attempts |
+| `GEMMA_MAX_RETRIES` | 2 | At most 3 transport attempts per logical model request |
 | `SESSION_TTL_SECONDS` | 1200 | Absolute session lifetime, not sliding |
 | `SESSION_MAX_COUNT` | 32 | Process-local context capacity; oldest evicted first |
 | `SESSION_MAX_BYTES` | 67108864 | Accounted context budget, including history allowance |
@@ -75,7 +90,7 @@ Frontend `VITE_API_BASE_URL` is optional in development. For a separate producti
 
 ## Architecture and API
 
-Gemma 4 interprets page images, extracts bilingual scholarship facts and structured rules, and reasons conversationally over the same notice. Ordinary application code validates uploads/JSON, verifies quotations, compares rules, retains bounded contexts and renders the UI. See [architecture](docs/architecture.md) and [Gemma integration](docs/gemma-integration.md).
+Gemma 4 interprets numbered page images and reliable text, extracts bilingual scholarship facts and structured rules, and reasons conversationally over the same notice. Ordinary application code validates uploads/JSON, verifies quotations, compares rules, retains bounded contexts and renders the UI. See [architecture](docs/architecture.md) and [Gemma integration](docs/gemma-integration.md).
 
 | Endpoint | Input | Behavior |
 | --- | --- | --- |
@@ -83,6 +98,7 @@ Gemma 4 interprets page images, extracts bilingual scholarship facts and structu
 | `POST /api/analyze` | multipart `file`, JSON `profile` | Validated analysis, verified citations, roadmap, opaque `session_id` and TTL |
 | `POST /api/chat` | JSON `session_id`, `question`, `language` (`en`/`kn`) | Genuine Gemma answer with independently checked citations |
 | `POST /api/chat/reset` | JSON `session_id` | Clears that session's conversation history |
+| `POST /api/analysis/translate` | JSON `session_id` | Repairs only missing/invalid dynamic translations, retaining context and chat; returns updated analysis and roadmap |
 | `POST /api/session/delete` | JSON `session_id` | Releases context; UI invokes this on new analysis/reset/file replacement |
 
 Chat questions are limited to 2,000 characters. Missing/expired/evicted contexts return 410; overlapping requests within one chat return 409. The session token is a bearer capability: anyone possessing it can use the context until deletion/expiry. It stays in frontend memory, never in a URL. No authentication is implemented.
@@ -107,6 +123,15 @@ npm run test:e2e
 
 Browser tests own ports 18030 and 15173; these must be free. `tests.e2e_server:app` is **test-only** and uses `httpx.MockTransport`, never Google's real API. Production must start **`app.main:app`**. Browser tests exercise actual PDF.js rendering at desktop/laptop/tablet/mobile widths, uploads, citations, chat, Kannada UI, checklist download, errors, multipage navigation, keyboard focus, responsive navigation and print layout. See [testing details and live-language matrix](docs/testing.md). Mocked tests do not establish model accuracy.
 
+For a genuine live-model smoke test, start the production backend with a valid private key, then run from `backend/`:
+
+```bash
+python scripts/live_smoke.py tests/fixtures/notice_A.pdf --percentage 65
+python scripts/live_smoke.py tests/fixtures/notice_B.pdf --annual-income 180000
+```
+
+These commands make real, quota-consuming requests. The script prints analysis facts for your inspection and deletes its temporary session after success. Use non-sensitive notices and do not publish private output. A successful call does not establish model accuracy. Test all five fixtures and real consented notices using the regression checklist.
+
 ## Render Deployment
 
 The existing `render.yaml` remains a Python web service plus static Vite site. It uses Python 3.12 and `uvicorn app.main:app`, not the test server. Set `GEMINI_API_KEY` privately, `FRONTEND_ORIGIN` to the exact static-site origin, and build-time `VITE_API_BASE_URL` to the backend origin. Use Node 22.13+; the Blueprint pins Node 22. Deploy the static `dist/` folder with SPA fallback to `index.html`. No paid database is required.
@@ -118,6 +143,8 @@ Use **one backend worker/instance** for this prototype: sessions are local to a 
 - 500/502/503/504: provider transients retry twice with exponential backoff and jitter; use Retry after failure. Upload/profile remain selected.
 - 429: without a short valid `Retry-After`, return immediately. A wait longer than 8 seconds is left to the user, avoiding repeated quota consumption.
 - 401/403/404 or invalid requests: not automatically retried. Check server-side key/model permissions and configuration.
+- Empty/default/malformed/truncated extraction: one structured recovery request, then a visible error. Valid complete extraction is not duplicated. Missing translations may add one separate targeted model call; a user-triggered translation retry never re-runs document analysis.
+- Worst case: two logical extraction calls plus one translation call, each with up to three transport attempts (nine total). Timeouts are per attempt, not a total deadline; slow providers can take several minutes.
 - 410 in chat: analyze the document again; the context expired or was evicted/restarted.
 - Unverified citation: inspect the cited page; the quotation was not reliably located. Partial match never means verified.
 - Text verification unavailable: images/scanned pages have no reliable text layer. Multimodal analysis still works, but automatic evidence verification does not.

@@ -7,7 +7,7 @@ import httpx
 from pydantic import ValidationError
 
 from .config import Settings
-from .evidence import verify_citation
+from .evidence import verify_source
 from .gemma import GemmaError, SYSTEM_RULES, generate_text
 from .schemas import ChatAnswer
 from .sessions import DocumentSession
@@ -47,7 +47,7 @@ async def answer_question(session: DocumentSession, question: str, language: str
     except (ValueError, ValidationError) as exc:
         raise GemmaError("Gemma returned an unreadable assistant answer. Please retry.") from exc
     for citation in result.citations:
-        citation.verification = verify_citation(citation, session.pages)
+        verify_source(citation, session.pages)
         if citation.page is not None and citation.page > len(session.pages):
             citation.page = None
     if language == "kn":

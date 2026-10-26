@@ -1,5 +1,13 @@
 # Testing and Honest Verification
 
+## V5 Functionality Regression Coverage
+
+The new repair tests exercise wrapped/aliased/truncated/empty model output, all five page images and text reaching the provider request, formatted numeric parsing, deterministic academic/income/education comparisons, conservative linked/exclusion handling, targeted translation with number preservation, exact-page recovery, and session/chat preservation. `tests/fixtures/notice_A.pdf` through `notice_E.pdf` are explicitly fictional controlled notices: academic (page 2), income (page 3), postgraduate-only, Kannada (page 2), and image-only scan.
+
+`test_fixture_pipeline.py` sends real PDF uploads through FastAPI, rendering, real request construction/parser/validation, independent evidence verification and deterministic comparisons. Only Google HTTP responses are mocked. Browser `repair.spec.ts` covers all five PDFs across four viewport sizes, English-Kannada-English document content, status counts, quotations and navigation to the original source page. Existing browser tests are retained. Screenshots disable animation only while capturing for stable test output; production CSS/animations are unchanged.
+
+Run `python scripts/live_smoke.py --help` from `backend/` for the real-model procedure. Start **app.main:app**, not the fixture server. Supply a valid private backend key and follow the delivered regression checklist. The smoke procedure uses real HTTP/provider calls and cleans up the temporary session on success. It has not been run against Google in this delivery; no key was available.
+
 ## V4 UI Regression Coverage
 
 The premium UI upgrade retains the original backend and its tests. Frontend checks now also cover all seven profile properties, replacement preview, arrow-key result tabs, assistant/roadmap navigation, drawer focus/closure, expanded-view focus/closure, image analysis, reduced motion, exported completion status and print visibility. Browser projects cover desktop (1440x1100), laptop (1100x900), tablet (820x1180) and mobile (375x844). See `docs/ui-ux-v4.md`; final executed results are in the V4 delivery report. The baseline and post-change results are distinguished there.

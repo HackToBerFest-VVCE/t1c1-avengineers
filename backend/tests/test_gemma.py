@@ -18,11 +18,11 @@ MODEL_OUTPUT = {
     "deadline": {"date_text": "15 December 2026", "iso_date": "2026-12-15", "evidence": "15 December 2026", "page": 1},
     "criteria": [{
         "requirement": "Minimum marks 70%", "evidence": "70%", "page": 1,
-        "status": "likely_meets", "explanation_en": "Student reported 85%",
+        "status": "likely_meets", "requirement_kn": "ಕನಿಷ್ಠ ಅಂಕಗಳು 70%", "explanation_en": "Student reported 85%",
         "explanation_kn": "ವಿದ್ಯಾರ್ಥಿ 85% ಅಂಕಗಳನ್ನು ತಿಳಿಸಿದ್ದಾರೆ"
     }],
-    "documents": [{"name": "Marksheet", "evidence": "Marksheet", "page": 1}],
-    "steps": [{"title": "Prepare", "detail_en": "Check documents", "detail_kn": "ದಾಖಲೆಗಳನ್ನು ಪರಿಶೀಲಿಸಿ"}],
+    "documents": [{"name": "Marksheet", "name_kn": "ಅಂಕಪಟ್ಟಿ", "evidence": "Marksheet", "page": 1}],
+    "steps": [{"title": "Prepare", "title_kn": "ಸಿದ್ಧಪಡಿಸಿ", "detail_en": "Check documents", "detail_kn": "ದಾಖಲೆಗಳನ್ನು ಪರಿಶೀಲಿಸಿ"}],
     "unknowns": [], "warnings": [], "confidence": "high",
 }
 
@@ -33,11 +33,11 @@ def test_parse_fenced_json():
     assert result.deadline.iso_date == "2026-12-15"
 
 
-def test_out_of_range_evidence_is_removed():
+def test_out_of_range_page_removed_but_quote_retained_for_manual_review():
     payload = {**MODEL_OUTPUT, "deadline": {**MODEL_OUTPUT["deadline"], "page": 7}}
     result = parse_gemma_output(json.dumps(payload), 1)
     assert result.deadline.page is None
-    assert result.deadline.evidence is None
+    assert result.deadline.evidence == "15 December 2026"
     assert result.warnings
 
 
@@ -67,7 +67,7 @@ async def test_real_gemma_rest_payload_is_constructed_correctly():
     assert "gemma-4-26b-a4b-it:generateContent" in seen["url"]
     assert seen["headers"]["x-goog-api-key"] == "test-only"
     parts = seen["body"]["contents"][0]["parts"]
-    assert base64.b64decode(parts[1]["inline_data"]["data"]) == image
+    assert base64.b64decode(next(part["inline_data"]["data"] for part in parts if "inline_data" in part)) == image
     assert "Gemma" in seen["body"]["systemInstruction"]["parts"][0]["text"] or "document" in seen["body"]["systemInstruction"]["parts"][0]["text"]
 
 
