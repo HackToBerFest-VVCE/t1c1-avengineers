@@ -1,4 +1,4 @@
-import type { Analysis, Health, Profile, ChatAnswer, Language } from './types';
+import type { Analysis, Health, Profile, ChatAnswer, Language, FreshnessCheckResult, FreshnessCompareResult } from './types';
 
 export const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '');
 
@@ -57,3 +57,14 @@ export async function loadSampleFile(name: string): Promise<File> {
     type: name === 'pdf' ? 'application/pdf' : 'image/png',
   });
 }
+
+// ── Scholarship Freshness Intelligence API ──────────────────────────────
+
+export const checkFreshness = (session_id: string) =>
+  sessionPost<FreshnessCheckResult>('/api/freshness/check', { session_id });
+
+export const compareFreshness = (session_id: string, source_url: string) =>
+  sessionPost<FreshnessCompareResult>('/api/freshness/compare', { session_id, source_url });
+
+export const analyzeLatest = (session_id: string, source_url: string) =>
+  sessionPost<Partial<Analysis> & { source_url: string; source_document_version: string; analysis_source: string }>('/api/freshness/analyze-latest', { session_id, source_url });

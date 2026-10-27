@@ -14,6 +14,15 @@ class Settings(BaseSettings):
     session_ttl_seconds: int = Field(default=1200, ge=60, le=3600)
     session_max_count: int = Field(default=32, ge=1, le=128)
     session_max_bytes: int = Field(default=64 * 1024 * 1024, ge=1_000_000, le=256 * 1024 * 1024)
+
+    # Scholarship Freshness Intelligence settings
+    search_provider: str = "tavily"
+    tavily_api_key: str = ""
+    freshness_search_enabled: bool = True
+    freshness_max_search_results: int = Field(default=5, ge=1, le=10)
+    freshness_request_timeout_seconds: float = Field(default=20.0, ge=5, le=60)
+    freshness_authority_domains: str = ""  # Comma-separated extra domains
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 

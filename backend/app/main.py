@@ -21,6 +21,12 @@ from .chat import answer_question
 from .roadmap import build_roadmap
 from .localization import repair_languages
 from .schemas import AnalysisResponse, HealthResponse, StudentProfile, ChatRequest, ChatAnswer, SessionRequest
+from .freshness_schemas import (
+    FreshnessCheckRequest, FreshnessCheckResponse,
+    FreshnessCompareRequest, FreshnessCompareResponse,
+    FreshnessAnalyzeRequest,
+)
+from .freshness import check_freshness, compare_documents, analyze_latest_document
 
 settings = get_settings()
 @asynccontextmanager
@@ -158,6 +164,61 @@ async def translate_analysis(body: SessionRequest):
 async def delete_session(body: SessionRequest):
     app.state.sessions.delete(body.session_id)
     return {"status": "deleted"}
+
+
+# ── Scholarship Freshness Intelligence endpoints ─────────────────────────
+
+@app.post("/api/freshness/check", response_model=FreshnessCheckResponse)
+async def freshness_check(body: FreshnessCheckRequest) -> FreshnessCheckResponse:
+    """Identify the scholarship and search for newer official versions."""
+    session = require_session(body.session_id)
+    if session.lock.locked():
+        raise HTTPException(409, "Another operation is in progress. Please wait.")
+    async with session.lock:
+        try:
+            return await check_freshness(session, settings)
+        except GemmaError as exc:
+            raise HTTPException(exc.status, str(exc)) from exc
+
+
+@app.post("/api/freshness/compare", response_model=FreshnessCompareResponse)
+async def freshness_compare(body: FreshnessCompareRequest) -> FreshnessCompareResponse:
+    """Compare uploaded scholarship with a newer official version."""
+    session = require_session(body.session_id)
+    if session.lock.locked():
+        raise HTTPException(409, "Another operation is in progress. Please wait.")
+    async with session.lock:
+        try:
+            return await compare_documents(session, body.source_url, settings)
+        except GemmaError as exc:
+            raise HTTPException(exc.status, str(exc)) from exc
+
+
+@app.post("/api/freshness/analyze-latest")
+async def freshness_analyze_latest(body: FreshnessAnalyzeRequest):
+    """Analyze the latest official version using the existing FormBridge pipeline."""
+    session = require_session(body.session_id)
+    if session.lock.locked():
+        raise HTTPException(409, "Another operation is in progress. Please wait.")
+    async with session.lock:
+        try:
+            result, pages, source_version = await analyze_latest_document(
+                session, body.source_url, settings
+            )
+        except GemmaError as exc:
+            raise HTTPException(exc.status, str(exc)) from exc
+
+        verify_analysis(result, pages)
+        result.eligibility_overall, result.criteria = assess_all(result.criteria, session.profile)
+
+        return {
+            **result.model_dump(),
+            "roadmap": [task.model_dump() for task in build_roadmap(result, session.profile)],
+            "source_url": body.source_url,
+            "source_document_version": source_version,
+            "analysis_source": "updated_official_document",
+            "model_used": settings.gemma_model,
+        }
 
 
 @app.exception_handler(Exception)

@@ -36,6 +36,113 @@ See `FormBridge_AI_v5_Bug_Fix_Report.md` and `FormBridge_AI_v5_Regression_Checkl
 - Bounded, expiring document sessions for real Gemma 4 chat, server-held context/history, English/Kannada responses, clickable citations, reset and retry.
 - Bilingual application roadmap with critical/important/optional priorities, tab-local checkbox progress, text download and printing. Checking a box does not submit an application.
 - Bounded transient API retries, safe diagnostic logging and input-preserving error recovery. No production mock mode or model substitution.
+- **Scholarship Freshness Intelligence**: Automatic detection of outdated scholarship notifications using LangChain-orchestrated web search, Gemma 4-powered document comparison, and official-source verification. See below.
+
+## Scholarship Freshness Intelligence
+
+**Powered by LangChain + Google Gemma 4**
+
+Students may upload outdated scholarship notifications. This feature automatically searches for newer official scholarship guidelines, validates sources, compares changes, and enables students to analyze the latest verified document.
+
+### Architecture
+
+```
+Student uploads document
+  → Existing /api/analyze → Analysis results shown
+  → Click "Check for Latest Guidelines"
+  → POST /api/freshness/check
+    → Gemma 4: Identify scholarship (reuses existing analysis when possible)
+    → LangChain RunnableSequence: Search orchestration
+      → Step 1: Generate targeted queries (deterministic)
+      → Step 2: Execute Tavily web search
+      → Step 3: Filter, validate, rank sources
+    → Source validation (domain allowlists, SSRF protection, URL safety)
+    → Freshness determination (year comparison, official-domain priority)
+  → UI: Freshness status card with sources
+  → Click "Compare Versions"
+  → POST /api/freshness/compare
+    → Retrieve official document safely
+    → Gemma 4: Compare old vs new (structured field comparison)
+  → UI: Comparison table with evidence
+  → Click "Analyze Updated Scholarship"
+  → POST /api/freshness/analyze-latest
+    → Existing FormBridge AI pipeline (reused)
+    → Eligibility recalculated, roadmap regenerated
+```
+
+### How LangChain Is Used
+
+LangChain provides genuine orchestration of the freshness workflow:
+
+- **`RunnableSequence`** chains coordinate the multi-step search pipeline (query generation → web search → result filtering → source ranking)
+- **`RunnableLambda`** wraps each deterministic processing step
+- **`Tool`** wraps the Tavily search provider for reusable search invocation
+- The chain passes retrieved context to Gemma 4 for AI-powered analysis
+
+This is a **deterministic workflow**, not an autonomous agent — no uncontrolled loops or repeated LLM calls.
+
+### How Gemma 4 Is Used
+
+Gemma 4 performs the meaningful intelligence tasks:
+
+1. **Scholarship identification**: Extracts scholarship name, issuing organization, academic year, and keywords from uploaded documents
+2. **Document comparison**: Compares eligibility criteria, income limits, deadlines, benefits, and other fields between uploaded and newer versions
+3. **Updated document analysis**: Full re-analysis using the existing FormBridge pipeline when the student chooses to analyze the latest version
+
+### Rate-Limit Safety
+
+- Maximum **3 Gemma API calls** per complete freshness workflow (identify + compare + analyze-latest)
+- No uncontrolled agent loops
+- Cached search results within session (5-minute TTL)
+- Reuses existing analysis data — no duplicate extraction
+- Deterministic Python for domain validation, date comparison, URL safety
+
+### Search Provider Configuration
+
+The search provider is configurable. The default is [Tavily](https://tavily.com/) which offers a free tier.
+
+### Freshness Status Values
+
+| Status | Meaning |
+| --- | --- |
+| Newer Official Version Found | A source with a more recent year was found on an official domain |
+| Uploaded Document Appears Current | The latest source matches the uploaded document's year |
+| No Newer Version Verified | No relevant official sources were found |
+| Unable to Verify Freshness | Insufficient data to determine freshness (missing dates, search failure) |
+| Multiple Candidate Versions Found | Multiple newer sources exist; manual review recommended |
+
+### Freshness API Endpoints
+
+| Endpoint | Input | Behavior |
+| --- | --- | --- |
+| `POST /api/freshness/check` | JSON `session_id` | Identify scholarship, search for newer versions, return status and sources |
+| `POST /api/freshness/compare` | JSON `session_id`, `source_url` | Compare uploaded vs newer document using Gemma 4 |
+| `POST /api/freshness/analyze-latest` | JSON `session_id`, `source_url` | Re-analyze the newer document through the full FormBridge pipeline |
+
+### Source Validation
+
+Official sources are prioritized using configurable domain allowlists:
+- `.gov.in`, `.nic.in` (Indian government)
+- `scholarships.gov.in`, `nsp.gov.in` (National Scholarship Portal)
+- `ugc.gov.in`, `ugc.ac.in` (UGC)
+- State scholarship portals
+- Custom domains via `FRESHNESS_AUTHORITY_DOMAINS`
+
+Blocked: scholarship aggregator blogs (buddy4study, careers360, etc.)
+
+Security: SSRF protection, private IP rejection, credential stripping, content-type validation, size limits, redirect safety.
+
+### Demonstration for Judges
+
+1. Upload an older Ishan Uday scholarship notification (or any scholarship PDF)
+2. Wait for analysis to complete
+3. Click **"Check for Latest Guidelines"** in the Freshness Intelligence panel
+4. View the freshness status, discovered official sources, and verification explanation
+5. If a newer version is found, click **"Compare Versions"** to see field-by-field differences
+6. Click **"Analyze Updated Scholarship"** to re-analyze with the latest version
+7. The system clearly indicates which document version produced the displayed results
+
+The feature works with any scholarship scheme — it is not hardcoded for a specific scholarship.
 
 ## Prerequisites
 
@@ -85,6 +192,12 @@ Backend variables (see `backend/.env.example`):
 | `SESSION_TTL_SECONDS` | 1200 | Absolute session lifetime, not sliding |
 | `SESSION_MAX_COUNT` | 32 | Process-local context capacity; oldest evicted first |
 | `SESSION_MAX_BYTES` | 67108864 | Accounted context budget, including history allowance |
+| `SEARCH_PROVIDER` | `tavily` | Web search provider for freshness intelligence |
+| `TAVILY_API_KEY` | (none) | Tavily API key ([get free key](https://tavily.com/)) |
+| `FRESHNESS_SEARCH_ENABLED` | `true` | Enable/disable freshness search feature |
+| `FRESHNESS_MAX_SEARCH_RESULTS` | 5 | Maximum search results per query |
+| `FRESHNESS_REQUEST_TIMEOUT_SECONDS` | 20 | Timeout for search and document retrieval |
+| `FRESHNESS_AUTHORITY_DOMAINS` | (none) | Extra comma-separated official domains |
 
 Frontend `VITE_API_BASE_URL` is optional in development. For a separate production host, set it to the public backend origin, without `/api`. Never put credentials in any `VITE_*` variable.
 
@@ -100,6 +213,9 @@ Gemma 4 interprets numbered page images and reliable text, extracts bilingual sc
 | `POST /api/chat/reset` | JSON `session_id` | Clears that session's conversation history |
 | `POST /api/analysis/translate` | JSON `session_id` | Repairs only missing/invalid dynamic translations, retaining context and chat; returns updated analysis and roadmap |
 | `POST /api/session/delete` | JSON `session_id` | Releases context; UI invokes this on new analysis/reset/file replacement |
+| `POST /api/freshness/check` | JSON `session_id` | Identify scholarship, search for newer official versions, return freshness status |
+| `POST /api/freshness/compare` | JSON `session_id`, `source_url` | Compare uploaded vs newer document using Gemma 4 |
+| `POST /api/freshness/analyze-latest` | JSON `session_id`, `source_url` | Analyze newer document through existing pipeline |
 
 Chat questions are limited to 2,000 characters. Missing/expired/evicted contexts return 410; overlapping requests within one chat return 409. The session token is a bearer capability: anyone possessing it can use the context until deletion/expiry. It stays in frontend memory, never in a URL. No authentication is implemented.
 
@@ -107,10 +223,12 @@ Chat questions are limited to 2,000 characters. Missing/expired/evicted contexts
 
 ```bash
 cd backend
-python -m pytest -q
+source .venv/bin/activate
+python -m pytest -q                       # All backend tests (including 54 freshness tests)
+python -m pytest tests/test_freshness.py -v  # Freshness-specific tests only
 cd ../frontend
-npm run test -- --run
-npm run build
+npm run test -- --run                     # All frontend tests (including 7 freshness tests)
+npm run build                             # TypeScript check + production build
 ```
 
 Optional repeatable browser validation (requires the backend `.venv` above):

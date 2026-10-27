@@ -65,3 +65,78 @@ export interface Health {
   gemma_configured: boolean;
   model: string;
 }
+
+// ── Scholarship Freshness Intelligence types ────────────────────────────
+
+export type FreshnessStatus =
+  | 'newer_official_version_found'
+  | 'uploaded_document_appears_current'
+  | 'no_newer_version_verified'
+  | 'unable_to_verify_freshness'
+  | 'multiple_candidate_versions_found';
+
+export interface ScholarshipIdentity {
+  scholarship_name: string;
+  issuing_organization: string | null;
+  government_department: string | null;
+  notification_date: string | null;
+  academic_year: string | null;
+  scheme_id: string | null;
+  keywords: string[];
+  confidence: 'high' | 'medium' | 'low';
+}
+
+export interface OfficialSource {
+  url: string;
+  title: string;
+  snippet: string;
+  domain: string;
+  is_official: boolean;
+  authority_match: string | null;
+  publication_date: string | null;
+  academic_year: string | null;
+  relevance_score: number;
+  retrieval_status: string;
+  content_preview: string;
+}
+
+export interface FreshnessCheckResult {
+  status: FreshnessStatus;
+  scholarship: ScholarshipIdentity;
+  sources: OfficialSource[];
+  uploaded_year: string | null;
+  candidate_latest_year: string | null;
+  issuing_authority: string | null;
+  official_source_url: string | null;
+  verification_explanation: string;
+  checked_at: string;
+  search_provider: string;
+  search_query_used: string;
+  error: string | null;
+}
+
+export interface ComparisonField {
+  field_name: string;
+  uploaded_value: string;
+  newer_value: string;
+  change_type: 'changed' | 'added' | 'removed' | 'unchanged' | 'uncertain';
+  evidence_uploaded: string;
+  evidence_newer: string;
+}
+
+export interface FreshnessCompareResult {
+  scholarship_name: string;
+  uploaded_year: string | null;
+  newer_year: string | null;
+  source_url: string;
+  source_title: string;
+  comparisons: ComparisonField[];
+  summary: string;
+  disclaimer: string;
+}
+
+export interface FreshnessAnalyzeResult extends Analysis {
+  source_url: string;
+  source_document_version: string;
+  analysis_source: 'updated_official_document';
+}

@@ -21,6 +21,7 @@ import { contentText, needsContentTranslation } from './lib/content';
 import { useModalFocus } from './lib/useModalFocus';
 import ResultHeader from './components/ResultHeader';
 import AnalysisOverview from './components/AnalysisOverview';
+import FreshnessIntelligence from './components/FreshnessIntelligence';
 const DocumentViewer = lazy(() => import('./components/DocumentViewer'));
 
 type Tab = 'overview' | 'eligibility' | 'documents' | 'roadmap' | 'assistant';
@@ -126,6 +127,7 @@ export default function App() {
   const [activeNav, setActiveNav] = useState('Dashboard');
   const [evidence, setEvidence] = useState<SourceFact | null>(null);
   const [viewerOpen, setViewerOpen] = useState(false);
+  const [updatedSource, setUpdatedSource] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const resultsRef = useRef<HTMLElement>(null);
   const sidebarRef = useRef<HTMLElement>(null);
@@ -221,7 +223,7 @@ export default function App() {
     if (loading) return;
     if (analysis?.session_id) void deleteSession(analysis.session_id).catch(() => {});
     setFile(null); setError(''); setTranslationError(''); setAnalysis(null);
-    setViewerOpen(false); setEvidence(null);
+    setViewerOpen(false); setEvidence(null); setUpdatedSource(null);
     setDoneDocuments([]); setTab('overview');
     if (fileInput.current) fileInput.current.value = '';
   };
@@ -476,6 +478,21 @@ export default function App() {
             ) : (
               <div className="results-content">
                 <ResultHeader analysis={analysis} language={language}/>
+                {updatedSource && (
+                  <div className="inline-notice info" role="status">
+                    <Info size={18}/>
+                    <span>{t(language, 'Analysis based on updated document from')} <a href={updatedSource} target="_blank" rel="noopener noreferrer">{updatedSource.replace(/^https?:\/\//, '').slice(0, 60)}</a></span>
+                  </div>
+                )}
+                <FreshnessIntelligence
+                  analysis={analysis}
+                  language={language}
+                  onAnalysisUpdate={(updated) => {
+                    setAnalysis(current => current ? { ...current, ...updated } as typeof current : current);
+                    setUpdatedSource((updated as Record<string, unknown>).source_url as string || null);
+                    setTab('overview');
+                  }}
+                />
                 {needsContentTranslation(analysis) && <div className="inline-notice warning" role="status"><Info size={18}/><span>{t(language, 'Some document-content translations are unavailable. Your analysis and source citations are retained.')}</span><button disabled={translating} onClick={() => void retryTranslation()}>{t(language, translating ? 'Translating content…' : 'Retry translation')}</button></div>}
                 {translationError && <div className="inline-notice error" role="alert"><AlertTriangle size={18}/><span>{friendlyError(language, translationError)}</span></div>}
                 <div className={`evidence-workspace${viewerOpen ? ' with-viewer' : ''}`}>
